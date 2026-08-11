@@ -1,0 +1,6 @@
+case_id,force_n,length_m,width_m,height_m,material
+case_100N,100,1.0,0.1,0.1,Structural Steel
+case_250N,250,1.0,0.1,0.1,Structural Steel
+case_500N,500,1.0,0.1,0.1,Structural Steel
+case_750N,750,1.0,0.1,0.1,Structural Steel
+case_1000N,1000,1.0,0.1,0.1,Structural Steel

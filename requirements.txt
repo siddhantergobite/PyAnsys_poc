@@ -1,0 +1,7 @@
+ansys-mapdl-core==0.73.2
+ansys-mechanical-core==0.12.12
+ansys-tools-visualization-interface
+matplotlib
+psutil
+fastapi
+uvicorn

@@ -1,0 +1,5 @@
+case_id,template,force_n,length_m,width_m,height_m,diameter_m,mesh_size_m,material
+table_demo,table,500,1.2,0.6,0.75,0.04,0.05,Structural Steel
+bolt_demo,bolt,1000,0.08,0.1,0.1,0.01,0.01,Structural Steel
+screw_demo,screw,500,0.06,0.1,0.1,0.006,0.01,Structural Steel
+nut_demo,nut,1000,0.02,0.1,0.1,0.014,0.005,Structural Steel

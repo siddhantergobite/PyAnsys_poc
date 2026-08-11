@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+output/**/*.csv
+output/**/*.json
+output/**/*.png
+output/**/*.log
+mapdl_runs/
+*.lock
+frontend/node_modules/
+frontend/dist/
+tmp/

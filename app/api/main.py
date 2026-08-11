@@ -10,10 +10,10 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.simulation.cantilever import solve_cantilever
-from app.simulation.config import CantileverInputs, get_paths
+from app.simulation.cantilever import solve_cantilever_range
+from app.simulation.config import CantileverInputs, ForceRange, get_paths
 from app.simulation.examples import TEMPLATE_DEFINITIONS, ExampleInputs, solve_example
 from app.simulation.mapdl_session import close_session, launch_session
 from app.simulation.materials import get_material, material_catalog_payload
@@ -39,7 +39,12 @@ class SimulationRequest(BaseModel):
 
     case_id: str = Field(default="api_case", pattern=r"^[A-Za-z0-9_-]{1,32}$")
     template: Literal["cantilever", "table", "bolt", "screw", "nut"] = "cantilever"
-    force_n: float = Field(default=1000.0, gt=0, le=10000)
+    # ``force_n`` remains accepted for existing API clients. New cantilever
+    # runs use the bounded start/end/steps force sweep below.
+    force_n: float | None = Field(default=None, gt=0, le=100000)
+    force_start_n: float = Field(default=100.0, gt=0, le=100000)
+    force_end_n: float = Field(default=1000.0, gt=0, le=100000)
+    force_steps: int = Field(default=5, ge=2, le=21)
     length_m: float = Field(default=1.0, gt=0, le=2.0)
     width_m: float = Field(default=0.1, gt=0, le=1.5)
     height_m: float = Field(default=0.1, gt=0, le=1.5)
@@ -52,6 +57,26 @@ class SimulationRequest(BaseModel):
     def validate_material(cls, value: str) -> str:
         get_material(value)
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_legacy_force(cls, values):
+        """Allow the earlier single-force API payload without changing clients."""
+
+        if not isinstance(values, dict):
+            return values
+        if values.get("force_n") is None or "force_start_n" in values or "force_end_n" in values:
+            return values
+        mapped = dict(values)
+        mapped["force_start_n"] = mapped["force_n"]
+        mapped["force_end_n"] = mapped["force_n"]
+        mapped["force_steps"] = 2
+        return mapped
+
+    @model_validator(mode="after")
+    def validate_force_range(self):
+        ForceRange(self.force_start_n, self.force_end_n, self.force_steps).validate()
+        return self
 
 
 @app.get("/health")
@@ -90,7 +115,7 @@ def simulate(request: SimulationRequest) -> dict:
     if request.template == "cantilever":
         inputs = CantileverInputs(
             case_id=request.case_id,
-            force_n=request.force_n,
+            force_n=request.force_end_n,
             length_m=request.length_m,
             width_m=request.width_m,
             height_m=request.height_m,
@@ -101,7 +126,7 @@ def simulate(request: SimulationRequest) -> dict:
         inputs = ExampleInputs(
             template=request.template,
             case_id=request.case_id,
-            force_n=request.force_n,
+            force_n=request.force_n or request.force_end_n,
             length_m=request.length_m,
             width_m=request.width_m,
             height_m=request.height_m,
@@ -116,7 +141,16 @@ def simulate(request: SimulationRequest) -> dict:
             inputs.validate()
             mapdl = launch_session(paths.mapdl_executable, paths.run_root, jobname)
             if request.template == "cantilever":
-                result = solve_cantilever(mapdl, inputs, output_dir)
+                result = solve_cantilever_range(
+                    mapdl,
+                    inputs,
+                    ForceRange(
+                        start_n=request.force_start_n,
+                        end_n=request.force_end_n,
+                        steps=request.force_steps,
+                    ),
+                    output_dir,
+                )
             else:
                 result = solve_example(mapdl, inputs, output_dir)
             write_result_files(result, output_dir)
@@ -127,13 +161,17 @@ def simulate(request: SimulationRequest) -> dict:
                 close_session(mapdl, jobname)
 
     relative = f"/artifacts/{run_id}"
+    files = {
+        "csv": f"{relative}/results.csv",
+        "json": f"{relative}/results.json",
+        "stress_image": f"{relative}/stress.png",
+        "deformation_image": f"{relative}/deformation.png",
+    }
+    if result.sweep_image:
+        files["force_sweep_image"] = f"{relative}/force_sweep.png"
+
     return {
         "run_id": run_id,
         "result": result.as_dict(),
-        "files": {
-            "csv": f"{relative}/results.csv",
-            "json": f"{relative}/results.json",
-            "stress_image": f"{relative}/stress.png",
-            "deformation_image": f"{relative}/deformation.png",
-        },
+        "files": files,
     }

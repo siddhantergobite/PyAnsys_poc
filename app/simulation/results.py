@@ -32,6 +32,13 @@ class SimulationResult:
     template: str = "cantilever"
     stress_method: str = "solver"
     diameter_m: float | None = None
+    force_start_n: float | None = None
+    force_end_n: float | None = None
+    force_steps: int | None = None
+    break_force_n: float | None = None
+    break_status: str = "not_evaluated"
+    force_curve: list[dict[str, Any]] | None = None
+    sweep_image: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -44,6 +51,34 @@ def write_result_files(result: SimulationResult, output_dir: Path) -> None:
         json.dump(payload, stream, indent=2)
 
     with (output_dir / "results.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(payload))
-        writer.writeheader()
-        writer.writerow(payload)
+        if result.force_curve:
+            # A range run is useful only when each force point is visible in
+            # Excel/CSV. Keep the shared run metadata with every point.
+            fields = [
+                "case_id", "template", "material", "force_n",
+                "maximum_stress_pa", "maximum_displacement_m", "safety_factor",
+                "point_status", "force_start_n", "force_end_n", "force_steps",
+                "break_force_n", "break_status", "reference_strength_pa",
+                "strength_basis", "stress_method",
+            ]
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            common = {
+                "case_id": result.case_id,
+                "template": result.template,
+                "material": result.material,
+                "force_start_n": result.force_start_n,
+                "force_end_n": result.force_end_n,
+                "force_steps": result.force_steps,
+                "break_force_n": result.break_force_n,
+                "break_status": result.break_status,
+                "reference_strength_pa": result.reference_strength_pa,
+                "strength_basis": result.strength_basis,
+                "stress_method": result.stress_method,
+            }
+            for point in result.force_curve:
+                writer.writerow({**common, **point})
+        else:
+            writer = csv.DictWriter(stream, fieldnames=list(payload))
+            writer.writeheader()
+            writer.writerow(payload)

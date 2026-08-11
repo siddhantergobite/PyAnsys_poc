@@ -95,6 +95,25 @@ The five approved cases are defined in `input\cases.csv`. Each case gets its
 own folder under `output\batch`, and the aggregate file is
 `output\batch\results.csv`.
 
+### 3a. Controlled force-range sweep
+
+The cantilever API and dashboard can also evaluate an inclusive force range:
+
+- start force
+- end force
+- number of checks (2–21)
+
+MAPDL performs one independent solve for every force value. The output folder
+contains the normal final-force `stress.png` and `deformation.png`, plus
+`force_sweep.png`, `results.csv`, and `results.json`. The CSV has one row
+per force value, so the response can be audited or plotted elsewhere.
+
+The reported threshold is the first checked/interpolated point at which the
+linear-elastic stress reaches the selected material's named reference strength.
+It is a **reference-strength threshold**, not a prediction that the part
+physically fractures. Actual breakage requires a validated nonlinear material
+model, product geometry, contacts, and failure criteria.
+
 ### 4. Minimal API
 
 Install the requirements, then start the API from the repository root:
@@ -174,9 +193,9 @@ documented reference strength.
 
 ## First-template inputs
 
-The initial BEAM188 template uses SI units and one selected controlled material:
+The initial BEAM188 template uses SI units and a selected controlled material:
 
-- Force: 100, 250, 500, 750, or 1000 N
+- Single force, or a bounded range of 2–21 force values
 - Beam length: 1.0 m
 - Rectangular section width: 0.1 m
 - Rectangular section height: 0.1 m

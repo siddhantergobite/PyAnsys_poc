@@ -11,7 +11,15 @@ from dataclasses import dataclass
 from math import pi
 from pathlib import Path
 
-from .cantilever import _beam_max_bending_stress, _export_images, _finite_max
+import matplotlib
+import numpy as np
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib import colors
+from matplotlib.patches import Rectangle
+
+from .cantilever import _beam_bending_stress_values, _finite_max
 from .materials import get_material
 from .results import SimulationResult
 
@@ -194,24 +202,252 @@ def _axial_stress(inputs: ExampleInputs) -> float:
     return inputs.force_n / area
 
 
+def _export_axial_images(
+    mapdl,
+    inputs: ExampleInputs,
+    output_dir: Path,
+    axial_stress_pa: float,
+) -> tuple[str, str]:
+    """Create readable reports for the simplified shank model.
+
+    The shank is a one-dimensional BEAM188 abstraction: the stress display is
+    the template's uniform force/area result and the displacement line is read
+    from the MAPDL solution. It deliberately does not pretend to show threads,
+    bolt heads, nut contact, or a real product CAD contour.
+    """
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stress_path = output_dir / "stress.png"
+    deformation_path = output_dir / "deformation.png"
+    nodes = np.asarray(mapdl.mesh.nodes, dtype=float)
+    x_coordinates = nodes[:, 0]
+    axial_displacements_m = np.asarray(
+        mapdl.post_processing.nodal_displacement("X"), dtype=float
+    )
+    order = np.argsort(x_coordinates)
+    x_coordinates = x_coordinates[order]
+    axial_displacements_m = axial_displacements_m[order]
+    diameter = inputs.diameter_m
+    stress_mpa = axial_stress_pa / 1e6
+    colour_map = plt.get_cmap("turbo")
+    normaliser = colors.Normalize(vmin=0.0, vmax=max(stress_mpa, 1e-9))
+
+    figure, axis = plt.subplots(figsize=(10, 3.6))
+    axis.add_patch(
+        Rectangle(
+            (0.0, -diameter / 2.0),
+            inputs.length_m,
+            diameter,
+            facecolor=colour_map(normaliser(stress_mpa)),
+            edgecolor="#163b60",
+            linewidth=1.8,
+        )
+    )
+    axis.axvline(0.0, color="#163b60", linewidth=5, alpha=0.8)
+    axis.annotate(
+        "Fixed support",
+        xy=(0.0, -diameter / 2.0),
+        xytext=(0.02 * inputs.length_m, -1.8 * diameter),
+        arrowprops={"arrowstyle": "->", "color": "#163b60"},
+        color="#163b60",
+    )
+    axis.annotate(
+        f"Uniform section stress = {stress_mpa:.3f} MPa",
+        xy=(inputs.length_m * 0.52, 0.0),
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+        color="#132f4c",
+    )
+    axis.set_title(
+        f"MAPDL simplified {TEMPLATE_DEFINITIONS[inputs.template]['name']} shank stress",
+        fontweight="bold",
+    )
+    axis.set_xlabel("Shank position (m)")
+    axis.set_ylabel("Shank diameter (m)")
+    axis.set_xlim(-0.06 * inputs.length_m, 1.06 * inputs.length_m)
+    axis.set_ylim(-1.45 * diameter, 1.2 * diameter)
+    axis.set_aspect("equal", adjustable="box")
+    axis.grid(alpha=0.2)
+    scalar_map = plt.cm.ScalarMappable(norm=normaliser, cmap=colour_map)
+    scalar_map.set_array([])
+    colour_bar = figure.colorbar(scalar_map, ax=axis, pad=0.02)
+    colour_bar.set_label("Section stress (MPa)")
+    figure.text(
+        0.5,
+        0.01,
+        "PoC axial shank abstraction - no threads, head geometry, or contact model.",
+        ha="center",
+        color="#52677d",
+        fontsize=9,
+    )
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    figure.savefig(stress_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+
+    displacement_mm = axial_displacements_m * 1e3
+    figure, axis = plt.subplots(figsize=(10, 4.2))
+    points = axis.scatter(
+        x_coordinates,
+        displacement_mm,
+        c=np.abs(displacement_mm),
+        cmap="turbo",
+        s=55,
+        zorder=3,
+    )
+    axis.plot(x_coordinates, displacement_mm, color="#315f89", linewidth=2.2)
+    axis.scatter(
+        [x_coordinates[0]],
+        [displacement_mm[0]],
+        marker="s",
+        s=85,
+        color="#163b60",
+        label="Fixed support",
+        zorder=4,
+    )
+    axis.annotate(
+        f"Maximum = {np.max(np.abs(displacement_mm)):.4f} mm",
+        xy=(x_coordinates[-1], displacement_mm[-1]),
+        xytext=(-130, 18),
+        textcoords="offset points",
+        arrowprops={"arrowstyle": "->", "color": "#163b60"},
+        color="#163b60",
+        fontweight="bold",
+    )
+    axis.set_title(
+        f"MAPDL nodal axial displacement - {TEMPLATE_DEFINITIONS[inputs.template]['name']}",
+        fontweight="bold",
+    )
+    axis.set_xlabel("Shank position (m)")
+    axis.set_ylabel("Axial displacement (mm)")
+    axis.grid(alpha=0.25)
+    axis.legend(loc="best")
+    colour_bar = figure.colorbar(points, ax=axis, pad=0.02)
+    colour_bar.set_label("Absolute displacement (mm)")
+    figure.tight_layout()
+    figure.savefig(deformation_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    return stress_path.name, deformation_path.name
+
+
+def _export_table_images(
+    mapdl,
+    inputs: ExampleInputs,
+    output_dir: Path,
+    stress_values_pa: np.ndarray,
+) -> tuple[str, str]:
+    """Create solver-derived reports for the simplified four-leg table frame."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stress_path = output_dir / "stress.png"
+    deformation_path = output_dir / "deformation.png"
+    stress_mpa = np.asarray(stress_values_pa, dtype=float) / 1e6
+    nodes = np.asarray(mapdl.mesh.nodes, dtype=float)
+    displacement_mm = np.asarray(
+        mapdl.post_processing.nodal_displacement("NORM"), dtype=float
+    ) * 1e3
+
+    figure, axis = plt.subplots(figsize=(11, 4.5))
+    element_index = np.arange(1, len(stress_mpa) + 1)
+    bars = axis.bar(element_index, stress_mpa, color=plt.get_cmap("turbo")(colors.Normalize(
+        vmin=0.0, vmax=max(float(np.max(stress_mpa)), 1e-9)
+    )(stress_mpa)))
+    if len(stress_mpa):
+        maximum_index = int(np.argmax(stress_mpa))
+        bars[maximum_index].set_edgecolor("#9a321f")
+        bars[maximum_index].set_linewidth(2)
+        axis.annotate(
+            f"Maximum = {stress_mpa[maximum_index]:.3f} MPa",
+            xy=(element_index[maximum_index], stress_mpa[maximum_index]),
+            xytext=(0, 12),
+            textcoords="offset points",
+            ha="center",
+            color="#163b60",
+            fontweight="bold",
+        )
+    axis.set_title("MAPDL simplified table-frame BEAM188 stress by element", fontweight="bold")
+    axis.set_xlabel("BEAM188 element sequence")
+    axis.set_ylabel("Extreme-fibre bending stress (MPa)")
+    axis.grid(axis="y", alpha=0.25)
+    figure.text(
+        0.5,
+        0.01,
+        "Direct BEAM188 section stress; this is a frame model, not a solid or joint-contact contour.",
+        ha="center",
+        color="#52677d",
+        fontsize=9,
+    )
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    figure.savefig(stress_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+
+    figure = plt.figure(figsize=(8.8, 6.4))
+    axis = figure.add_subplot(111, projection="3d")
+    points = axis.scatter(
+        nodes[:, 0],
+        nodes[:, 1],
+        nodes[:, 2],
+        c=displacement_mm,
+        cmap="turbo",
+        s=34,
+        depthshade=False,
+    )
+    axis.scatter(
+        nodes[:, 0],
+        nodes[:, 1],
+        np.zeros(len(nodes)),
+        marker="s",
+        color="#163b60",
+        s=26,
+        alpha=0.5,
+        label="Support level",
+    )
+    axis.set_title("MAPDL simplified table-frame nodal displacement", fontweight="bold")
+    axis.set_xlabel("X (m)")
+    axis.set_ylabel("Y (m)")
+    axis.set_zlabel("Z (m)")
+    axis.legend(loc="upper left")
+    colour_bar = figure.colorbar(points, ax=axis, shrink=0.72, pad=0.08)
+    colour_bar.set_label("Nodal displacement magnitude (mm)")
+    figure.text(
+        0.5,
+        0.02,
+        f"Maximum MAPDL nodal displacement = {np.max(displacement_mm):.4f} mm",
+        ha="center",
+        color="#163b60",
+        fontweight="bold",
+    )
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    figure.savefig(deformation_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    return stress_path.name, deformation_path.name
+
+
 def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationResult:
     """Solve one bounded table/bolt/screw/nut example with MAPDL."""
 
     inputs.validate()
     if inputs.template == "table":
         _build_table(mapdl, inputs)
-        maximum_stress = _beam_max_bending_stress(mapdl)
+        stress_values = _beam_bending_stress_values(mapdl)
+        maximum_stress = _finite_max(stress_values, "table beam stress")
         stress_method = TEMPLATE_DEFINITIONS[inputs.template]["stress_method"]
+        stress_image, displacement_image = _export_table_images(
+            mapdl, inputs, output_dir, stress_values
+        )
     else:
         _build_axial(mapdl, inputs, tube=inputs.template == "nut")
         maximum_stress = _axial_stress(inputs)
         stress_method = TEMPLATE_DEFINITIONS[inputs.template]["stress_method"]
+        stress_image, displacement_image = _export_axial_images(
+            mapdl, inputs, output_dir, maximum_stress
+        )
 
     maximum_displacement = _finite_max(
         mapdl.post_processing.nodal_displacement("NORM"), "displacement"
     )
     safety_factor = inputs.yield_strength_pa / maximum_stress if maximum_stress > 0 else None
-    stress_image, displacement_image = _export_images(mapdl, output_dir)
     return SimulationResult(
         case_id=inputs.case_id,
         force_n=inputs.force_n,

@@ -102,3 +102,27 @@ def default_inputs(case_id: str = "single_1000N", force_n: float = 1000.0) -> Ca
     inputs = CantileverInputs(case_id=case_id, force_n=float(force_n))
     inputs.validate()
     return inputs
+
+
+@dataclass(frozen=True)
+class ForceRange:
+    """A bounded, inclusive force sweep for the cantilever PoC."""
+
+    start_n: float
+    end_n: float
+    steps: int = 5
+
+    def validate(self) -> None:
+        if self.start_n <= 0 or self.end_n <= 0:
+            raise ValueError("force range values must be greater than zero")
+        if self.end_n < self.start_n:
+            raise ValueError("force_end_n must be greater than or equal to force_start_n")
+        if not 2 <= self.steps <= 21:
+            raise ValueError("force_steps must be between 2 and 21")
+
+    def values(self) -> tuple[float, ...]:
+        self.validate()
+        if self.start_n == self.end_n:
+            return (float(self.start_n),)
+        increment = (self.end_n - self.start_n) / (self.steps - 1)
+        return tuple(float(self.start_n + index * increment) for index in range(self.steps))

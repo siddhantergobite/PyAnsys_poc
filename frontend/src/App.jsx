@@ -29,6 +29,9 @@ const initialForm = {
   case_id: "dashboard_case",
   template: "cantilever",
   force_n: 1000,
+  force_start_n: 100,
+  force_end_n: 1000,
+  force_steps: 5,
   length_m: 1,
   width_m: 0.1,
   height_m: 0.1,
@@ -132,7 +135,14 @@ function App() {
 
             <div className="field-group">
               <h3>{isAxial && form.template === "nut" ? "Compression and material" : "Load and material"}</h3>
-              <label>{form.template === "nut" ? "Applied compression" : "Applied force"}<span className="unit">N</span><input name="force_n" type="number" min="0.001" max="10000" step="any" value={form.force_n} onChange={update} /></label>
+              {isCantilever ? <>
+                <div className="range-grid">
+                  <label>Start force<span className="unit">N</span><input name="force_start_n" type="number" min="0.001" max="100000" step="any" value={form.force_start_n} onChange={update} /></label>
+                  <label>End force<span className="unit">N</span><input name="force_end_n" type="number" min="0.001" max="100000" step="any" value={form.force_end_n} onChange={update} /></label>
+                  <label className="range-steps">Checks in range<input name="force_steps" type="number" min="2" max="21" step="1" value={form.force_steps} onChange={update} /></label>
+                </div>
+                <p className="field-help">MAPDL solves every force point. A threshold means the selected material&apos;s reference strength is reached; it is not a physical fracture prediction.</p>
+              </> : <label>{form.template === "nut" ? "Applied compression" : "Applied force"}<span className="unit">N</span><input name="force_n" type="number" min="0.001" max="100000" step="any" value={form.force_n} onChange={update} /></label>}
               <label>Material<select name="material" value={form.material} onChange={update}>{materials.length ? materials.map((material) => <option key={material.name} value={material.name}>{material.name}</option>) : <option>Structural Steel</option>}</select></label>
               {materials.find((material) => material.name === form.material) && <p className="field-help material-help">The selected, grade-specific engineering card is sent directly to MAPDL.</p>}
             </div>
@@ -158,9 +168,10 @@ function App() {
             {busy && <div className="empty-state loading-state"><div className="loader" /><h3>MAPDL is solving</h3><p>The local solver is meshing and evaluating the selected example. Keep this page open.</p></div>}
             {simulation && <>
               <div className="result-summary"><p className="result-case">Run ID <strong>{result.run_id}</strong><span className="result-template">{MODEL_OPTIONS[simulation.template]?.name ?? simulation.template}</span></p><div className="metrics"><Metric label="Maximum stress" value={`${(simulation.maximum_stress_pa / 1e6).toFixed(3)} MPa`} tone="blue" /><Metric label="Maximum displacement" value={`${(simulation.maximum_displacement_m * 1000).toFixed(4)} mm`} tone="orange" /><Metric label="Safety factor" value={simulation.safety_factor?.toFixed(3) ?? "—"} tone="green" /></div></div>
+              {simulation.force_curve?.length > 1 && <div className="sweep-summary"><strong>Force sweep: {simulation.force_start_n.toFixed(0)}–{simulation.force_end_n.toFixed(0)} N · {simulation.force_steps} MAPDL checks</strong>{simulation.break_force_n ? <span className="threshold-hit">Reference-strength threshold ≈ {simulation.break_force_n.toFixed(0)} N</span> : <span className="threshold-clear">Reference-strength threshold not reached in this range</span>}</div>}
               <div className="material-card"><div><span className="section-kicker">MAPDL MATERIAL CARD</span><h3>{simulation.material}</h3><p>{simulation.material_model_note}</p></div><dl><div><dt>Elastic modulus</dt><dd>{(simulation.youngs_modulus_pa / 1e9).toFixed(3)} GPa</dd></div><div><dt>Poisson ratio</dt><dd>{simulation.poissons_ratio.toFixed(2)}</dd></div><div><dt>Density</dt><dd>{simulation.density_kg_m3.toFixed(0)} kg/m³</dd></div><div><dt>Reference strength</dt><dd>{(simulation.reference_strength_pa / 1e6).toFixed(1)} MPa</dd></div></dl><small>Safety-factor basis: {simulation.strength_basis}</small></div>
-              <div className="output-section"><div><span className="section-kicker">FILES</span><h3>Download results</h3></div><div className="links"><a className="primary-link" href={fileUrl(result.files.csv)} target="_blank" rel="noreferrer">CSV results <span>↓</span></a><a href={fileUrl(result.files.json)} target="_blank" rel="noreferrer">View JSON</a><a href={fileUrl(result.files.stress_image)} target="_blank" rel="noreferrer">Stress image</a><a href={fileUrl(result.files.deformation_image)} target="_blank" rel="noreferrer">Deformation image</a></div></div>
-              <p className="method-note">Stress method: {simulation.stress_method}. For this force-controlled cantilever, material changes displacement and strength ratio; bending stress is governed by load and geometry.</p>
+              <div className="output-section"><div><span className="section-kicker">FILES</span><h3>Download results</h3></div><div className="links"><a className="primary-link" href={fileUrl(result.files.csv)} target="_blank" rel="noreferrer">CSV results <span>↓</span></a><a href={fileUrl(result.files.json)} target="_blank" rel="noreferrer">View JSON</a><a href={fileUrl(result.files.stress_image)} target="_blank" rel="noreferrer">Stress image</a><a href={fileUrl(result.files.deformation_image)} target="_blank" rel="noreferrer">Deformation image</a>{result.files.force_sweep_image && <a href={fileUrl(result.files.force_sweep_image)} target="_blank" rel="noreferrer">Force sweep</a>}</div></div>
+              <p className="method-note">{simulation.template === "cantilever" ? `Stress method: ${simulation.stress_method}. Every force point is solved by MAPDL; the threshold is a linear-elastic reference-strength crossing, not a physical fracture prediction.` : `Stress method: ${simulation.stress_method}. This is a simplified PoC template, not a validated production product model.`}</p>
             </>}
           </section>
         </section>

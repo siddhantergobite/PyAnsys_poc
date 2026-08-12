@@ -1,13 +1,10 @@
 """MAPDL launch and shutdown helpers."""
 
 from __future__ import annotations
-
 import time
 from pathlib import Path
-
 import psutil
 from ansys.mapdl.core import launch_mapdl
-
 
 def launch_session(executable: Path, run_location: Path, jobname: str):
     """Launch a clean local MAPDL session for one PoC case."""
@@ -33,7 +30,6 @@ def launch_session(executable: Path, run_location: Path, jobname: str):
         additional_switches="-smp",
         loglevel="WARNING",
     )
-
 
 def close_session(mapdl, jobname: str) -> None:
     """Close MAPDL and remove only the matching PoC solver process."""

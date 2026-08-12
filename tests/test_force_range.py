@@ -32,6 +32,24 @@ class ForceRangeTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             SimulationRequest(force_start_n=800.0, force_end_n=100.0, force_steps=5)
 
+    def test_api_has_no_arbitrary_upper_cap_on_physical_values(self):
+        request = SimulationRequest(
+            force_start_n=1.0e9,
+            force_end_n=2.0e9,
+            length_m=10.0,
+            width_m=2.0,
+            height_m=3.0,
+            diameter_m=1.0,
+            mesh_size_m=0.25,
+        )
+
+        self.assertEqual(request.force_end_n, 2.0e9)
+        self.assertEqual(request.length_m, 10.0)
+
+    def test_zero_geometry_is_still_rejected(self):
+        with self.assertRaises(ValidationError):
+            SimulationRequest(length_m=0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

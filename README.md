@@ -108,11 +108,13 @@ contains the normal final-force `stress.png` and `deformation.png`, plus
 `force_sweep.png`, `results.csv`, and `results.json`. The CSV has one row
 per force value, so the response can be audited or plotted elsewhere.
 
-The reported threshold is the first checked/interpolated point at which the
-linear-elastic stress reaches the selected material's named reference strength.
-It is a **reference-strength threshold**, not a prediction that the part
-physically fractures. Actual breakage requires a validated nonlinear material
-model, product geometry, contacts, and failure criteria.
+There is no arbitrary upper cap on force or geometry in the API. Values must
+still be positive and finite, and MAPDL may impose practical numerical,
+license, or mesh limits. For every linear-elastic result, the dashboard
+estimates the force at which the selected material's named reference strength
+would be reached. It is a **reference-strength threshold**, not a prediction
+that the part physically fractures. Actual breakage requires a validated
+nonlinear material model, product geometry, contacts, and failure criteria.
 
 ### 4. Minimal API
 
@@ -195,8 +197,8 @@ documented reference strength.
 
 The initial BEAM188 template uses SI units and a selected controlled material:
 
-- Single force, or a bounded range of 2–21 force values
-- Beam length: 1.0 m
+- Single force, or a range of 2–21 force evaluations
+- Beam length: 1.0 m by default; positive finite values are accepted
 - Rectangular section width: 0.1 m
 - Rectangular section height: 0.1 m
 - Fixed support at one end

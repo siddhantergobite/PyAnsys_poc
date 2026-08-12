@@ -114,7 +114,7 @@ function App() {
           <div>
             <p className="eyebrow">Controlled engineering run</p>
             <h1>Structural simulation dashboard</h1>
-            <p className="intro">Select a bounded example, update its approved inputs, and receive solver results as CSV, JSON, and images.</p>
+            <p className="intro">Select an approved example, update its inputs, and receive solver results as CSV, JSON, and images.</p>
           </div>
           <div className="model-badge">
             <span className="model-icon">▰</span>
@@ -124,12 +124,12 @@ function App() {
 
         <section className="dashboard-grid">
           <form className="panel input-panel" onSubmit={runSimulation}>
-            <div className="panel-heading"><div><span className="section-kicker">01 / INPUTS</span><h2>Simulation setup</h2></div><span className="template-tag">Bounded template</span></div>
+            <div className="panel-heading"><div><span className="section-kicker">01 / INPUTS</span><h2>Simulation setup</h2></div><span className="template-tag">PoC template</span></div>
 
             <div className="field-group">
               <h3>Model selection</h3>
               <label>Model template<select name="template" value={form.template} onChange={update}>{Object.entries(MODEL_OPTIONS).map(([key, model]) => <option key={key} value={key}>{model.name}</option>)}</select></label>
-              <p className="field-help">{selectedModel.description}. Each template has a deliberately limited input range.</p>
+              <p className="field-help">{selectedModel.description}. Enter positive finite values; practical solver errors are reported if a model cannot be solved.</p>
               <label>Case ID<input name="case_id" value={form.case_id} onChange={update} /></label>
             </div>
 
@@ -137,12 +137,12 @@ function App() {
               <h3>{isAxial && form.template === "nut" ? "Compression and material" : "Load and material"}</h3>
               {isCantilever ? <>
                 <div className="range-grid">
-                  <label>Start force<span className="unit">N</span><input name="force_start_n" type="number" min="0.001" max="100000" step="any" value={form.force_start_n} onChange={update} /></label>
-                  <label>End force<span className="unit">N</span><input name="force_end_n" type="number" min="0.001" max="100000" step="any" value={form.force_end_n} onChange={update} /></label>
+                  <label>Start force<span className="unit">N</span><input name="force_start_n" type="number" step="any" value={form.force_start_n} onChange={update} /></label>
+                  <label>End force<span className="unit">N</span><input name="force_end_n" type="number" step="any" value={form.force_end_n} onChange={update} /></label>
                   <label className="range-steps">Checks in range<input name="force_steps" type="number" min="2" max="21" step="1" value={form.force_steps} onChange={update} /></label>
                 </div>
-                <p className="field-help">MAPDL solves every force point. A threshold means the selected material&apos;s reference strength is reached; it is not a physical fracture prediction.</p>
-              </> : <label>{form.template === "nut" ? "Applied compression" : "Applied force"}<span className="unit">N</span><input name="force_n" type="number" min="0.001" max="100000" step="any" value={form.force_n} onChange={update} /></label>}
+                <p className="field-help">MAPDL solves every force point. The dashboard also estimates the force at the selected material&apos;s reference strength, even when it is outside this range. It is not a physical fracture prediction.</p>
+              </> : <label>{form.template === "nut" ? "Applied compression" : "Applied force"}<span className="unit">N</span><input name="force_n" type="number" step="any" value={form.force_n} onChange={update} /></label>}
               <label>Material<select name="material" value={form.material} onChange={update}>{materials.length ? materials.map((material) => <option key={material.name} value={material.name}>{material.name}</option>) : <option>Structural Steel</option>}</select></label>
               {materials.find((material) => material.name === form.material) && <p className="field-help material-help">The selected, grade-specific engineering card is sent directly to MAPDL.</p>}
             </div>
@@ -150,11 +150,11 @@ function App() {
             <div className="field-group">
               <h3>{isTable ? "Table dimensions" : "Model dimensions"} <span>metres</span></h3>
               <div className="field-grid">
-                <label>{isTable ? "Top length" : "Length"}<input name="length_m" type="number" min="0.001" max="2" step="any" value={form.length_m} onChange={update} /></label>
-                {isAxial ? <label>Diameter<input name="diameter_m" type="number" min="0.001" max="0.25" step="any" value={form.diameter_m} onChange={update} /></label> : <label>{isTable ? "Top width" : "Width"}<input name="width_m" type="number" min="0.001" max="1.5" step="any" value={form.width_m} onChange={update} /></label>}
-                {!isAxial && <label>{isTable ? "Leg height" : "Height"}<input name="height_m" type="number" min="0.001" max="1.5" step="any" value={form.height_m} onChange={update} /></label>}
-                {isTable && <label>Leg diameter<input name="diameter_m" type="number" min="0.001" max="0.25" step="any" value={form.diameter_m} onChange={update} /></label>}
-                <label>Mesh size<input name="mesh_size_m" type="number" min="0.001" max="0.5" step="any" value={form.mesh_size_m} onChange={update} /></label>
+                <label>{isTable ? "Top length" : "Length"}<input name="length_m" type="number" step="any" value={form.length_m} onChange={update} /></label>
+                {isAxial ? <label>Diameter<input name="diameter_m" type="number" step="any" value={form.diameter_m} onChange={update} /></label> : <label>{isTable ? "Top width" : "Width"}<input name="width_m" type="number" step="any" value={form.width_m} onChange={update} /></label>}
+                {!isAxial && <label>{isTable ? "Leg height" : "Height"}<input name="height_m" type="number" step="any" value={form.height_m} onChange={update} /></label>}
+                {isTable && <label>Leg diameter<input name="diameter_m" type="number" step="any" value={form.diameter_m} onChange={update} /></label>}
+                <label>Mesh size<input name="mesh_size_m" type="number" step="any" value={form.mesh_size_m} onChange={update} /></label>
               </div>
             </div>
 
@@ -168,10 +168,11 @@ function App() {
             {busy && <div className="empty-state loading-state"><div className="loader" /><h3>MAPDL is solving</h3><p>The local solver is meshing and evaluating the selected example. Keep this page open.</p></div>}
             {simulation && <>
               <div className="result-summary"><p className="result-case">Run ID <strong>{result.run_id}</strong><span className="result-template">{MODEL_OPTIONS[simulation.template]?.name ?? simulation.template}</span></p><div className="metrics"><Metric label="Maximum stress" value={`${(simulation.maximum_stress_pa / 1e6).toFixed(3)} MPa`} tone="blue" /><Metric label="Maximum displacement" value={`${(simulation.maximum_displacement_m * 1000).toFixed(4)} mm`} tone="orange" /><Metric label="Safety factor" value={simulation.safety_factor?.toFixed(3) ?? "—"} tone="green" /></div></div>
-              {simulation.force_curve?.length > 1 && <div className="sweep-summary"><strong>Force sweep: {simulation.force_start_n.toFixed(0)}–{simulation.force_end_n.toFixed(0)} N · {simulation.force_steps} MAPDL checks</strong>{simulation.break_force_n ? <span className="threshold-hit">Reference-strength threshold ≈ {simulation.break_force_n.toFixed(0)} N</span> : <span className="threshold-clear">Reference-strength threshold not reached in this range</span>}</div>}
+              {simulation.force_curve?.length > 1 && <div className="sweep-summary"><strong>Force sweep: {simulation.force_start_n.toFixed(0)}–{simulation.force_end_n.toFixed(0)} N · {simulation.force_steps} MAPDL checks</strong>{simulation.break_force_n != null ? <span className={simulation.break_status === "threshold_reached" ? "threshold-hit" : "threshold-clear"}>Reference-strength threshold ≈ {simulation.break_force_n.toFixed(0)} N{simulation.break_status === "threshold_estimated" ? " (estimated)" : ""}</span> : <span className="threshold-clear">Reference-strength threshold unavailable</span>}</div>}
               <div className="material-card"><div><span className="section-kicker">MAPDL MATERIAL CARD</span><h3>{simulation.material}</h3><p>{simulation.material_model_note}</p></div><dl><div><dt>Elastic modulus</dt><dd>{(simulation.youngs_modulus_pa / 1e9).toFixed(3)} GPa</dd></div><div><dt>Poisson ratio</dt><dd>{simulation.poissons_ratio.toFixed(2)}</dd></div><div><dt>Density</dt><dd>{simulation.density_kg_m3.toFixed(0)} kg/m³</dd></div><div><dt>Reference strength</dt><dd>{(simulation.reference_strength_pa / 1e6).toFixed(1)} MPa</dd></div></dl><small>Safety-factor basis: {simulation.strength_basis}</small></div>
               <div className="output-section"><div><span className="section-kicker">FILES</span><h3>Download results</h3></div><div className="links"><a className="primary-link" href={fileUrl(result.files.csv)} target="_blank" rel="noreferrer">CSV results <span>↓</span></a><a href={fileUrl(result.files.json)} target="_blank" rel="noreferrer">View JSON</a><a href={fileUrl(result.files.stress_image)} target="_blank" rel="noreferrer">Stress image</a><a href={fileUrl(result.files.deformation_image)} target="_blank" rel="noreferrer">Deformation image</a>{result.files.force_sweep_image && <a href={fileUrl(result.files.force_sweep_image)} target="_blank" rel="noreferrer">Force sweep</a>}</div></div>
-              <p className="method-note">{simulation.template === "cantilever" ? `Stress method: ${simulation.stress_method}. Every force point is solved by MAPDL; the threshold is a linear-elastic reference-strength crossing, not a physical fracture prediction.` : `Stress method: ${simulation.stress_method}. This is a simplified PoC template, not a validated production product model.`}</p>
+              {simulation.force_curve?.length <= 1 && simulation.break_force_n != null && <div className="sweep-summary"><strong>Reference-strength threshold</strong><span className={simulation.break_status === "threshold_reached" ? "threshold-hit" : "threshold-clear"}>threshold ≈ {simulation.break_force_n.toFixed(0)} N{simulation.break_status === "threshold_estimated" ? " (estimated)" : ""}</span></div>}
+              <p className="method-note">{simulation.template === "cantilever" ? `Stress method: ${simulation.stress_method}. The threshold is a linear-elastic reference-strength crossing, not a physical fracture prediction.` : `Stress method: ${simulation.stress_method}. The threshold is estimated from the linear-elastic result; this is a simplified PoC template, not a validated production product model.`}</p>
             </>}
           </section>
         </section>

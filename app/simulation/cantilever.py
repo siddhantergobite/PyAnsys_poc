@@ -266,6 +266,38 @@ def _first_strength_crossing(
     return None
 
 
+def _linear_reference_threshold_force(
+    force_n: float, stress_pa: float, reference_strength_pa: float
+) -> float | None:
+    """Estimate the force at the material reference strength.
+
+    All current PoC templates are linear elastic. Stress therefore scales with
+    force, allowing a threshold estimate even when the requested force sweep
+    does not reach the reference strength. This is not a physical fracture
+    prediction.
+    """
+
+    if force_n <= 0 or stress_pa <= 0 or reference_strength_pa <= 0:
+        return None
+    return force_n * reference_strength_pa / stress_pa
+
+
+def _estimate_linear_threshold_force(
+    curve: list[dict[str, float | str]], reference_strength_pa: float
+) -> float | None:
+    """Estimate a threshold from the first nonzero elastic result."""
+
+    for point in curve:
+        threshold = _linear_reference_threshold_force(
+            float(point["force_n"]),
+            float(point["maximum_stress_pa"]),
+            reference_strength_pa,
+        )
+        if threshold is not None:
+            return threshold
+    return None
+
+
 def _export_force_sweep_image(
     output_dir: Path,
     curve: list[dict[str, float | str]],
@@ -337,6 +369,16 @@ def solve_cantilever(mapdl, inputs: CantileverInputs, output_dir: Path) -> Simul
     safety_factor = (
         inputs.yield_strength_pa / maximum_stress if maximum_stress > 0 else None
     )
+    break_force_n = _linear_reference_threshold_force(
+        inputs.force_n, maximum_stress, inputs.yield_strength_pa
+    )
+    break_status = (
+        "threshold_reached"
+        if break_force_n is not None and maximum_stress >= inputs.yield_strength_pa
+        else "threshold_estimated"
+        if break_force_n is not None
+        else "not_evaluated"
+    )
     stress_image, displacement_image = _export_cantilever_images(
         mapdl, inputs, output_dir, stress_values, displacement_values
     )
@@ -359,6 +401,8 @@ def solve_cantilever(mapdl, inputs: CantileverInputs, output_dir: Path) -> Simul
         material_model_note=inputs.material_model_note or "",
         stress_image=stress_image,
         displacement_image=displacement_image,
+        break_force_n=break_force_n,
+        break_status=break_status,
     )
 
 
@@ -406,8 +450,15 @@ def solve_cantilever_range(
         final_stress = maximum_stress
         final_displacement = maximum_displacement
 
-    break_force_n = _first_strength_crossing(curve, inputs.yield_strength_pa)
-    break_status = "threshold_reached" if break_force_n is not None else "not_reached"
+    crossing_force_n = _first_strength_crossing(curve, inputs.yield_strength_pa)
+    estimated_force_n = _estimate_linear_threshold_force(curve, inputs.yield_strength_pa)
+    break_force_n = crossing_force_n if crossing_force_n is not None else estimated_force_n
+    if crossing_force_n is not None:
+        break_status = "threshold_reached"
+    elif estimated_force_n is not None:
+        break_status = "threshold_estimated"
+    else:
+        break_status = "not_evaluated"
     final_safety_factor = inputs.yield_strength_pa / final_stress if final_stress > 0 else None
     stress_image, displacement_image = _export_cantilever_images(
         mapdl,

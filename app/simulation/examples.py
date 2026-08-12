@@ -202,6 +202,18 @@ def _axial_stress(inputs: ExampleInputs) -> float:
     return inputs.force_n / area
 
 
+def _reference_threshold_force(inputs: ExampleInputs, maximum_stress: float) -> float | None:
+    """Estimate the force at the material reference strength.
+
+    The extension templates are linear-elastic PoC abstractions, so this is a
+    reference-strength threshold rather than a physical break prediction.
+    """
+
+    if maximum_stress <= 0 or inputs.yield_strength_pa is None:
+        return None
+    return inputs.force_n * inputs.yield_strength_pa / maximum_stress
+
+
 def _export_axial_images(
     mapdl,
     inputs: ExampleInputs,
@@ -448,6 +460,14 @@ def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationR
         mapdl.post_processing.nodal_displacement("NORM"), "displacement"
     )
     safety_factor = inputs.yield_strength_pa / maximum_stress if maximum_stress > 0 else None
+    threshold_force_n = _reference_threshold_force(inputs, maximum_stress)
+    threshold_status = (
+        "threshold_reached"
+        if threshold_force_n is not None and maximum_stress >= inputs.yield_strength_pa
+        else "threshold_estimated"
+        if threshold_force_n is not None
+        else "not_evaluated"
+    )
     return SimulationResult(
         case_id=inputs.case_id,
         force_n=inputs.force_n,
@@ -470,4 +490,6 @@ def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationR
         template=inputs.template,
         stress_method=stress_method,
         diameter_m=inputs.diameter_m,
+        break_force_n=threshold_force_n,
+        break_status=threshold_status,
     )

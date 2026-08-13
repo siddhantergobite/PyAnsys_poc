@@ -1,0 +1,25 @@
+Template: Ansys pressure vessel (official example adaptation) (pressure_vessel)
+Construction: generated parametrically by Python/PyMAPDL; no CAD file is imported
+MAPDL element: PLANE182
+Material: Structural Steel
+Elastic modulus: 200000000000 Pa
+Poisson ratio: 0.3
+Density: 7850 kg/m^3
+Reference strength: 250000000 Pa (yield strength)
+Final applied load: 2000000 Pa
+Mesh target size: 0.006 m
+Element: PLANE182, plane strain
+Topology: quarter annulus
+Support/load: symmetry constraints; internal pressure on inner radius
+Source: official PyMAPDL 2D pressure-vessel example adaptation
+
+Important limitations:
+- Linear isotropic, small-deformation screening model.
+- Bolt/screw/nut templates do not include threads, preload, head geometry, contact, friction, or stress concentration.
+- The table template does not include joint/contact details or solid members.
+- Reference-strength crossing is not an exact physical fracture prediction.
+
+Source code:
+- app/simulation/cantilever.py (cantilever)
+- app/simulation/examples.py (table, bolt, screw, nut)
+- app/simulation/official_examples.py (official example adaptations)

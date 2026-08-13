@@ -7,7 +7,7 @@ replacement for validated CAD/contact models of real products.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import pi
 from pathlib import Path
 
@@ -19,7 +19,19 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.patches import Rectangle
 
-from .cantilever import _beam_bending_stress_values, _finite_max
+from .cantilever import (
+    _beam_bending_stress_values,
+    _estimate_linear_threshold_force,
+    _finite_max,
+    _first_strength_crossing,
+)
+from .assessment import (
+    FailureAssessment,
+    assess_failure,
+    export_failure_assessment_image,
+    export_force_sweep_image,
+)
+from .config import ForceRange
 from .materials import get_material
 from .results import SimulationResult
 
@@ -192,6 +204,28 @@ def _build_axial(mapdl, inputs: ExampleInputs, tube: bool = False) -> None:
     _finish_and_solve(mapdl, inputs)
 
 
+def _resolve_existing_example(mapdl, inputs: ExampleInputs) -> None:
+    """Replace an example template's load and solve its existing MAPDL mesh."""
+
+    mapdl.finish()
+    mapdl.run("/SOLU")
+    mapdl.allsel("ALL")
+    mapdl.fdele("ALL", "ALL")
+    if inputs.template == "table":
+        mapdl.nsel("S", "LOC", "Z", inputs.height_m)
+        mapdl.nsel("R", "LOC", "X", 0.0)
+        mapdl.nsel("R", "LOC", "Y", 0.0)
+        mapdl.f("ALL", "FZ", -inputs.force_n)
+    else:
+        mapdl.nsel("S", "LOC", "X", inputs.length_m)
+        mapdl.f("ALL", "FX", inputs.force_n if inputs.template != "nut" else -inputs.force_n)
+    mapdl.allsel("ALL")
+    mapdl.solve()
+    mapdl.finish()
+    mapdl.post1()
+    mapdl.set("LAST")
+
+
 def _axial_stress(inputs: ExampleInputs) -> float:
     if inputs.template == "nut":
         outer = inputs.diameter_m / 2.0
@@ -214,11 +248,65 @@ def _reference_threshold_force(inputs: ExampleInputs, maximum_stress: float) -> 
     return inputs.force_n * inputs.yield_strength_pa / maximum_stress
 
 
+def _example_assessment(
+    mapdl,
+    inputs: ExampleInputs,
+    maximum_stress: float,
+    maximum_displacement: float,
+    stress_values: np.ndarray | None,
+):
+    """Build the shared dynamic screening result for an extension template."""
+
+    nodes = np.asarray(mapdl.mesh.nodes, dtype=float)
+    nodal_displacement = np.asarray(
+        mapdl.post_processing.nodal_displacement("NORM"), dtype=float
+    )
+    displacement_node = int(np.argmax(np.abs(nodal_displacement)))
+    displacement_xyz = nodes[displacement_node]
+    if inputs.template == "table":
+        stress_array = np.asarray(stress_values, dtype=float)
+        stress_element = int(np.argmax(np.abs(stress_array))) + 1
+        stress_location = f"BEAM188 table-frame element {stress_element} (highest section stress)"
+        displacement_location = (
+            f"MAPDL node at ({displacement_xyz[0]:.4g}, {displacement_xyz[1]:.4g}, "
+            f"{displacement_xyz[2]:.4g}) m (largest displacement)"
+        )
+        load_location = (
+            f"FZ load applied at the top-centre node set near (0, 0, "
+            f"{inputs.height_m:.4g}) m"
+        )
+        reference_length = inputs.height_m
+    else:
+        stress_location = (
+            f"Uniform {inputs.template} shank section (stress = force/area)"
+        )
+        displacement_location = (
+            f"MAPDL node near x={displacement_xyz[0]:.4g} m at the loaded end"
+        )
+        load_location = (
+            f"FX load applied at the loaded end x={inputs.length_m:.4g} m"
+        )
+        reference_length = inputs.length_m
+
+    assessment = assess_failure(
+        force_n=inputs.force_n,
+        maximum_stress_pa=maximum_stress,
+        reference_strength_pa=inputs.yield_strength_pa,
+        maximum_displacement_m=maximum_displacement,
+        deformation_reference_length_m=reference_length,
+        critical_stress_location=stress_location,
+        critical_displacement_location=displacement_location,
+        load_application_location=load_location,
+    )
+    return assessment
+
+
 def _export_axial_images(
     mapdl,
     inputs: ExampleInputs,
     output_dir: Path,
     axial_stress_pa: float,
+    assessment: FailureAssessment,
 ) -> tuple[str, str]:
     """Create readable reports for the simplified shank model.
 
@@ -244,7 +332,7 @@ def _export_axial_images(
     colour_map = plt.get_cmap("turbo")
     normaliser = colors.Normalize(vmin=0.0, vmax=max(stress_mpa, 1e-9))
 
-    figure, axis = plt.subplots(figsize=(10, 3.6))
+    figure, axis = plt.subplots(figsize=(10, 5.0))
     axis.add_patch(
         Rectangle(
             (0.0, -diameter / 2.0),
@@ -286,20 +374,12 @@ def _export_axial_images(
     scalar_map.set_array([])
     colour_bar = figure.colorbar(scalar_map, ax=axis, pad=0.02)
     colour_bar.set_label("Section stress (MPa)")
-    figure.text(
-        0.5,
-        0.01,
-        "PoC axial shank abstraction - no threads, head geometry, or contact model.",
-        ha="center",
-        color="#52677d",
-        fontsize=9,
-    )
-    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    figure.tight_layout()
     figure.savefig(stress_path, dpi=180, bbox_inches="tight", facecolor="white")
     plt.close(figure)
 
     displacement_mm = axial_displacements_m * 1e3
-    figure, axis = plt.subplots(figsize=(10, 4.2))
+    figure, axis = plt.subplots(figsize=(10, 5.6))
     points = axis.scatter(
         x_coordinates,
         displacement_mm,
@@ -321,7 +401,7 @@ def _export_axial_images(
     axis.annotate(
         f"Maximum = {np.max(np.abs(displacement_mm)):.4f} mm",
         xy=(x_coordinates[-1], displacement_mm[-1]),
-        xytext=(-130, 18),
+        xytext=(-125, -34),
         textcoords="offset points",
         arrowprops={"arrowstyle": "->", "color": "#163b60"},
         color="#163b60",
@@ -348,6 +428,7 @@ def _export_table_images(
     inputs: ExampleInputs,
     output_dir: Path,
     stress_values_pa: np.ndarray,
+    assessment: FailureAssessment,
 ) -> tuple[str, str]:
     """Create solver-derived reports for the simplified four-leg table frame."""
 
@@ -360,7 +441,7 @@ def _export_table_images(
         mapdl.post_processing.nodal_displacement("NORM"), dtype=float
     ) * 1e3
 
-    figure, axis = plt.subplots(figsize=(11, 4.5))
+    figure, axis = plt.subplots(figsize=(11, 6.0))
     element_index = np.arange(1, len(stress_mpa) + 1)
     bars = axis.bar(element_index, stress_mpa, color=plt.get_cmap("turbo")(colors.Normalize(
         vmin=0.0, vmax=max(float(np.max(stress_mpa)), 1e-9)
@@ -382,19 +463,11 @@ def _export_table_images(
     axis.set_xlabel("BEAM188 element sequence")
     axis.set_ylabel("Extreme-fibre bending stress (MPa)")
     axis.grid(axis="y", alpha=0.25)
-    figure.text(
-        0.5,
-        0.01,
-        "Direct BEAM188 section stress; this is a frame model, not a solid or joint-contact contour.",
-        ha="center",
-        color="#52677d",
-        fontsize=9,
-    )
-    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    figure.tight_layout()
     figure.savefig(stress_path, dpi=180, bbox_inches="tight", facecolor="white")
     plt.close(figure)
 
-    figure = plt.figure(figsize=(8.8, 6.4))
+    figure = plt.figure(figsize=(8.8, 7.8))
     axis = figure.add_subplot(111, projection="3d")
     points = axis.scatter(
         nodes[:, 0],
@@ -422,18 +495,32 @@ def _export_table_images(
     axis.legend(loc="upper left")
     colour_bar = figure.colorbar(points, ax=axis, shrink=0.72, pad=0.08)
     colour_bar.set_label("Nodal displacement magnitude (mm)")
-    figure.text(
-        0.5,
-        0.02,
-        f"Maximum MAPDL nodal displacement = {np.max(displacement_mm):.4f} mm",
-        ha="center",
-        color="#163b60",
-        fontweight="bold",
-    )
-    figure.tight_layout(rect=(0, 0.05, 1, 1))
+    figure.tight_layout()
     figure.savefig(deformation_path, dpi=180, bbox_inches="tight", facecolor="white")
     plt.close(figure)
     return stress_path.name, deformation_path.name
+
+
+def _extract_example_point(mapdl, inputs: ExampleInputs):
+    """Extract one solved example point without writing report images."""
+
+    if inputs.template == "table":
+        stress_values = _beam_bending_stress_values(mapdl)
+        maximum_stress = _finite_max(stress_values, "table beam stress")
+    else:
+        stress_values = None
+        maximum_stress = _axial_stress(inputs)
+    maximum_displacement = _finite_max(
+        mapdl.post_processing.nodal_displacement("NORM"), "displacement"
+    )
+    assessment = _example_assessment(
+        mapdl,
+        inputs,
+        maximum_stress,
+        maximum_displacement,
+        stress_values,
+    )
+    return stress_values, maximum_stress, maximum_displacement, assessment
 
 
 def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationResult:
@@ -442,23 +529,21 @@ def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationR
     inputs.validate()
     if inputs.template == "table":
         _build_table(mapdl, inputs)
-        stress_values = _beam_bending_stress_values(mapdl)
-        maximum_stress = _finite_max(stress_values, "table beam stress")
         stress_method = TEMPLATE_DEFINITIONS[inputs.template]["stress_method"]
-        stress_image, displacement_image = _export_table_images(
-            mapdl, inputs, output_dir, stress_values
-        )
     else:
         _build_axial(mapdl, inputs, tube=inputs.template == "nut")
-        maximum_stress = _axial_stress(inputs)
         stress_method = TEMPLATE_DEFINITIONS[inputs.template]["stress_method"]
-        stress_image, displacement_image = _export_axial_images(
-            mapdl, inputs, output_dir, maximum_stress
-        )
-
-    maximum_displacement = _finite_max(
-        mapdl.post_processing.nodal_displacement("NORM"), "displacement"
+    stress_values, maximum_stress, maximum_displacement, assessment = (
+        _extract_example_point(mapdl, inputs)
     )
+    if inputs.template == "table":
+        stress_image, displacement_image = _export_table_images(
+            mapdl, inputs, output_dir, stress_values, assessment
+        )
+    else:
+        stress_image, displacement_image = _export_axial_images(
+            mapdl, inputs, output_dir, maximum_stress, assessment
+        )
     safety_factor = inputs.yield_strength_pa / maximum_stress if maximum_stress > 0 else None
     threshold_force_n = _reference_threshold_force(inputs, maximum_stress)
     threshold_status = (
@@ -467,6 +552,17 @@ def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationR
         else "threshold_estimated"
         if threshold_force_n is not None
         else "not_evaluated"
+    )
+    failure_image = export_failure_assessment_image(
+        output_dir,
+        template=TEMPLATE_DEFINITIONS[inputs.template]["name"],
+        material=inputs.material,
+        force_n=inputs.force_n,
+        maximum_stress_pa=maximum_stress,
+        maximum_displacement_m=maximum_displacement,
+        reference_strength_pa=inputs.yield_strength_pa,
+        assessment=assessment,
+        break_force_n=threshold_force_n,
     )
     return SimulationResult(
         case_id=inputs.case_id,
@@ -492,4 +588,159 @@ def solve_example(mapdl, inputs: ExampleInputs, output_dir: Path) -> SimulationR
         diameter_m=inputs.diameter_m,
         break_force_n=threshold_force_n,
         break_status=threshold_status,
+        failure_assessment_image=failure_image,
+        **assessment.as_result_fields(),
+    )
+
+
+def solve_example_range(
+    mapdl,
+    inputs: ExampleInputs,
+    force_range: ForceRange,
+    output_dir: Path,
+) -> SimulationResult:
+    """Solve every requested load point for table/bolt/screw/nut templates.
+
+    The first point builds and meshes the selected MAPDL model. Later points
+    replace only its nodal load and perform a fresh MAPDL solve. The spatial
+    stress, deformation, and failure-assessment reports correspond to the end
+    load, while the separate sweep report and JSON/CSV curve retain every
+    requested solution point.
+    """
+
+    inputs.validate()
+    force_range.validate()
+    curve: list[dict[str, float | str | bool]] = []
+    final_inputs = inputs
+    final_stress_values = None
+    final_stress = 0.0
+    final_displacement = 0.0
+    final_assessment = None
+
+    for point_index, force_n in enumerate(force_range.values()):
+        point_inputs = replace(inputs, force_n=force_n)
+        if point_index == 0:
+            if point_inputs.template == "table":
+                _build_table(mapdl, point_inputs)
+            else:
+                _build_axial(mapdl, point_inputs, tube=point_inputs.template == "nut")
+        else:
+            _resolve_existing_example(mapdl, point_inputs)
+        stress_values, maximum_stress, maximum_displacement, assessment = (
+            _extract_example_point(mapdl, point_inputs)
+        )
+        safety_factor = (
+            point_inputs.yield_strength_pa / maximum_stress
+            if maximum_stress > 0
+            else None
+        )
+        curve.append(
+            {
+                "force_n": force_n,
+                "maximum_stress_pa": maximum_stress,
+                "maximum_displacement_m": maximum_displacement,
+                "safety_factor": safety_factor if safety_factor is not None else "",
+                "point_status": (
+                    "threshold_reached"
+                    if maximum_stress >= point_inputs.yield_strength_pa
+                    else "within_reference_strength"
+                ),
+                "failure_status": assessment.failure_status,
+                "breakage_assessment": assessment.breakage_assessment,
+                "stress_utilization": assessment.stress_utilization or 0.0,
+                "deformation_ratio": assessment.deformation_ratio or 0.0,
+                "large_deformation_warning": assessment.large_deformation_warning,
+                "estimated_failure_load_n": assessment.estimated_failure_load_n or "",
+                "estimated_reference_strength_load_n": (
+                    assessment.estimated_reference_strength_load_n or ""
+                ),
+                "estimated_deformation_limit_load_n": (
+                    assessment.estimated_deformation_limit_load_n or ""
+                ),
+                "governing_screening_load_n": (
+                    assessment.governing_screening_load_n or ""
+                ),
+                "governing_screening_criterion": assessment.governing_screening_criterion,
+            }
+        )
+        final_inputs = point_inputs
+        final_stress_values = stress_values
+        final_stress = maximum_stress
+        final_displacement = maximum_displacement
+        final_assessment = assessment
+
+    if final_assessment is None:  # ForceRange validation currently makes this unreachable.
+        raise RuntimeError("The force range produced no MAPDL solution points")
+
+    reference_strength = float(inputs.yield_strength_pa)
+    crossing_force_n = _first_strength_crossing(curve, reference_strength)
+    estimated_force_n = _estimate_linear_threshold_force(curve, reference_strength)
+    break_force_n = crossing_force_n if crossing_force_n is not None else estimated_force_n
+    threshold_reached = any(
+        float(point["maximum_stress_pa"]) >= reference_strength for point in curve
+    )
+    if threshold_reached:
+        break_status = "threshold_reached"
+    elif estimated_force_n is not None:
+        break_status = "threshold_estimated"
+    else:
+        break_status = "not_evaluated"
+
+    if final_inputs.template == "table":
+        stress_image, displacement_image = _export_table_images(
+            mapdl, final_inputs, output_dir, final_stress_values, final_assessment
+        )
+    else:
+        stress_image, displacement_image = _export_axial_images(
+            mapdl, final_inputs, output_dir, final_stress, final_assessment
+        )
+    failure_image = export_failure_assessment_image(
+        output_dir,
+        template=TEMPLATE_DEFINITIONS[inputs.template]["name"],
+        material=inputs.material,
+        force_n=final_inputs.force_n,
+        maximum_stress_pa=final_stress,
+        maximum_displacement_m=final_displacement,
+        reference_strength_pa=reference_strength,
+        assessment=final_assessment,
+        break_force_n=break_force_n,
+    )
+    sweep_image = export_force_sweep_image(
+        output_dir,
+        curve=curve,
+        reference_strength_pa=reference_strength,
+        strength_basis=inputs.strength_basis or "reference strength",
+        break_force_n=break_force_n,
+    )
+    return SimulationResult(
+        case_id=inputs.case_id,
+        force_n=final_inputs.force_n,
+        material=inputs.material,
+        beam_length_m=inputs.length_m,
+        beam_width_m=inputs.width_m,
+        beam_height_m=inputs.height_m,
+        maximum_stress_pa=final_stress,
+        maximum_displacement_m=final_displacement,
+        safety_factor=(reference_strength / final_stress if final_stress > 0 else None),
+        status="completed",
+        youngs_modulus_pa=inputs.youngs_modulus_pa,
+        poissons_ratio=inputs.poissons_ratio,
+        density_kg_m3=inputs.density_kg_m3,
+        reference_strength_pa=reference_strength,
+        strength_basis=inputs.strength_basis or "reference strength",
+        material_model_note=inputs.material_model_note or "",
+        stress_image=stress_image,
+        displacement_image=displacement_image,
+        template=inputs.template,
+        stress_method=TEMPLATE_DEFINITIONS[inputs.template]["stress_method"],
+        diameter_m=inputs.diameter_m,
+        force_start_n=force_range.start_n,
+        force_end_n=force_range.end_n,
+        force_steps=len(curve),
+        break_force_n=break_force_n,
+        break_status=break_status,
+        force_curve=curve,
+        failure_assessment_image=failure_image,
+        sweep_image=sweep_image,
+        **final_assessment.as_result_fields(),
     )

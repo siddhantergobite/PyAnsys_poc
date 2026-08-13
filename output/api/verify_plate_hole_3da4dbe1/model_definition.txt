@@ -1,0 +1,25 @@
+Template: Ansys plate with a hole (official example adaptation) (plate_hole)
+Construction: generated parametrically by Python/PyMAPDL; no CAD file is imported
+MAPDL element: PLANE183
+Material: Structural Steel
+Elastic modulus: 200000000000 Pa
+Poisson ratio: 0.3
+Density: 7850 kg/m^3
+Reference strength: 250000000 Pa (yield strength)
+Final applied load: 2000 N
+Mesh target size: 0.01 m
+Element: PLANE183, plane stress with thickness
+Topology: rectangular plate with central circular hole
+Support/load: left edge restrained; coupled tensile force on right edge
+Source: official PyMAPDL plate-with-hole example adaptation
+
+Important limitations:
+- Linear isotropic, small-deformation screening model.
+- Bolt/screw/nut templates do not include threads, preload, head geometry, contact, friction, or stress concentration.
+- The table template does not include joint/contact details or solid members.
+- Reference-strength crossing is not an exact physical fracture prediction.
+
+Source code:
+- app/simulation/cantilever.py (cantilever)
+- app/simulation/examples.py (table, bolt, screw, nut)
+- app/simulation/official_examples.py (official example adaptations)

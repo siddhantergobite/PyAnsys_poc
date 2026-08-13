@@ -1,0 +1,24 @@
+Template: Cantilever beam (cantilever)
+Construction: generated parametrically by Python/PyMAPDL; no CAD file is imported
+MAPDL element: BEAM188
+Material: Structural Steel
+Elastic modulus: 200000000000 Pa
+Poisson ratio: 0.3
+Density: 7850 kg/m^3
+Reference strength: 250000000 Pa (yield strength)
+Final applied load: 1000 N
+Mesh target size: 0.05 m
+Geometry: length=1 m, rectangular width=0.1 m, height=0.1 m
+Boundary condition: all DOFs fixed at x=0
+Load: FY at free-end node set x=1 m
+Stress result: BEAM188 extreme-fibre bending stress from SMISC 32/33
+
+Important limitations:
+- Linear isotropic, small-deformation screening model.
+- Bolt/screw/nut templates do not include threads, preload, head geometry, contact, friction, or stress concentration.
+- The table template does not include joint/contact details or solid members.
+- Reference-strength crossing is not an exact physical fracture prediction.
+
+Source code:
+- app/simulation/cantilever.py (cantilever)
+- app/simulation/examples.py (table, bolt, screw, nut)

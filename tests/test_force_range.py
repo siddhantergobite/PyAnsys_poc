@@ -3,8 +3,11 @@ import unittest
 from pydantic import ValidationError
 
 from app.api.main import SimulationRequest
+from app.simulation.cantilever import (
+    _estimate_linear_threshold_force,
+    _first_strength_crossing,
+)
 from app.simulation.config import ForceRange
-
 
 class ForceRangeTests(unittest.TestCase):
     def test_values_are_evenly_spaced_and_inclusive(self):
@@ -50,6 +53,22 @@ class ForceRangeTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             SimulationRequest(length_m=0.0)
 
+    def test_crossing_inside_range_is_interpolated(self):
+        curve = [
+            {"force_n": 100.0, "maximum_stress_pa": 10.0},
+            {"force_n": 500.0, "maximum_stress_pa": 50.0},
+        ]
+
+        self.assertAlmostEqual(_first_strength_crossing(curve, 40.0), 400.0)
+
+    def test_range_start_above_threshold_does_not_become_threshold(self):
+        curve = [
+            {"force_n": 500.0, "maximum_stress_pa": 50.0},
+            {"force_n": 1000.0, "maximum_stress_pa": 100.0},
+        ]
+
+        self.assertIsNone(_first_strength_crossing(curve, 40.0))
+        self.assertAlmostEqual(_estimate_linear_threshold_force(curve, 40.0), 400.0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -106,7 +106,7 @@ def default_inputs(case_id: str = "single_1000N", force_n: float = 1000.0) -> Ca
 
 @dataclass(frozen=True)
 class ForceRange:
-    """A bounded, inclusive force sweep for the cantilever PoC."""
+    """A bounded, inclusive force sweep for every supported template."""
 
     start_n: float
     end_n: float

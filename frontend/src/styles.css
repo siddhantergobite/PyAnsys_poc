@@ -94,6 +94,17 @@ button:disabled { opacity: .62; cursor: wait; }
 .links .primary-link { border-color: #087f78; color: #fff; background: #087f78; }
 .links .primary-link:hover { background: #066a64; }
 .method-note { margin: 20px 0 0; color: #8a9aaa; font-size: .7rem; }
+.failure-card { margin-top: 18px; padding: 16px 17px; border: 1px solid #dce8ee; border-left: 4px solid #087f78; border-radius: 10px; background: #f7fbfb; }
+.failure-card h3 { margin: 0; color: #17334f; font-size: .95rem; }
+.failure-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.failure-card-heading strong { padding: 6px 8px; border-radius: 999px; color: #31506a; background: #fff; font-size: .68rem; white-space: nowrap; }
+.failure-card ul { margin: 13px 0 9px; padding-left: 18px; color: #31506a; font-size: .74rem; line-height: 1.5; }
+.failure-card p { margin: 0; color: #8a9aaa; font-size: .68rem; line-height: 1.45; }
+.failure-likely_failure_or_yielding { border-left-color: #b33a2a; background: #fff7f5; }
+.failure-likely_failure_or_yielding h3 { color: #a3281c; }
+.failure-large_deformation_warning { border-left-color: #c77b12; background: #fffaf1; }
+.failure-large_deformation_warning h3 { color: #9b5b06; }
+.failure-within_reference_strength { border-left-color: #2aa37e; }
 .material-help { margin-top: -4px; }
 .material-card { margin-top: 20px; padding: 17px; border: 1px solid #dce8ee; border-left: 4px solid #087f78; border-radius: 10px; background: #f7fbfb; }
 .material-card h3 { margin: 0 0 5px; color: #17334f; font-size: .98rem; }
@@ -106,4 +117,4 @@ button:disabled { opacity: .62; cursor: wait; }
 .footer-note { justify-content: space-between; gap: 15px; margin-top: 22px; color: #8a9aaa; font-size: .68rem; }
 
 @media (max-width: 900px) { .welcome-row { align-items: flex-start; flex-direction: column; } .model-badge { min-width: 0; } .dashboard-grid { grid-template-columns: 1fr; } .results-panel { min-height: 420px; } }
-@media (max-width: 600px) { .topbar { height: auto; padding-top: 15px; padding-bottom: 15px; align-items: flex-start; flex-direction: column; gap: 13px; } .topbar-meta { width: 100%; justify-content: space-between; } .page { padding-top: 30px; } .input-panel, .results-panel { padding: 20px; } .metrics, .material-card dl, .range-grid { grid-template-columns: 1fr; } .range-steps { grid-column: auto; max-width: none; } .sweep-summary { align-items: flex-start; flex-direction: column; } .output-section { align-items: flex-start; flex-direction: column; } .links { justify-content: flex-start; } .footer-note { align-items: flex-start; flex-direction: column; gap: 7px; } }
+@media (max-width: 600px) { .topbar { height: auto; padding-top: 15px; padding-bottom: 15px; align-items: flex-start; flex-direction: column; gap: 13px; } .topbar-meta { width: 100%; justify-content: space-between; } .page { padding-top: 30px; } .input-panel, .results-panel { padding: 20px; } .metrics, .material-card dl, .range-grid { grid-template-columns: 1fr; } .range-steps { grid-column: auto; max-width: none; } .sweep-summary { align-items: flex-start; flex-direction: column; } .output-section { align-items: flex-start; flex-direction: column; } .links { justify-content: flex-start; } .failure-card-heading { flex-direction: column; } .footer-note { align-items: flex-start; flex-direction: column; gap: 7px; } }

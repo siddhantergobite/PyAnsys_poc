@@ -1,215 +1,257 @@
-# PyAnsys Automation PoC
+# PyAnsys Structural Simulation PoC
 
-This repository implements the solver-first proof of concept from the supplied
-PyAnsys BRD: launch MAPDL from Python, run bounded structural templates, change
-approved inputs without GUI interaction, and export repeatable results.
+This project is a local FastAPI + React application that builds and solves eight
+parameter-driven structural templates with Ansys MAPDL through PyMAPDL:
 
-The current implementation intentionally uses PyMAPDL and the Student-compatible
-BEAM188 element. It controls a MAPDL solver session, not an already-open
-Mechanical Workbench window. For BEAM188, the stress result is the maximum
-extreme-fiber bending stress read from the element SMISC results, while the
-displacement is extracted from nodal results.
+- Cantilever beam
+- Ansys corner bracket (official PyMAPDL example adaptation)
+- Ansys plate with a hole (official PyMAPDL example adaptation)
+- Ansys pressure vessel (official PyMAPDL example adaptation)
+- Table frame
+- Bolt shank surrogate
+- Screw shank surrogate
+- Nut annular-section surrogate
 
-## Environment
+Every template supports a start load, end load, and 2-21 requested checks.
+Each point is solved by MAPDL. The application returns solver results, a
+point-by-point force curve, screening information, images, CSV/JSON files, a
+readable model definition, and the final native MAPDL database.
+
+## Important engineering scope
+
+This is a linear-elastic proof of concept, not a certified product failure
+model. It can report:
+
+- maximum stress and displacement;
+- reference-strength utilization and safety factor;
+- the location of the largest reported stress/displacement;
+- an estimated load at the selected material's reference strength;
+- a warning when displacement exceeds 10% of the model reference dimension.
+
+The reference-strength load is an elastic screening threshold. It is not an
+exact physical fracture load. Exact breakage requires validated product CAD,
+contacts, boundary conditions, nonlinear material curves, imperfections,
+thread/joint details, and an appropriate failure criterion.
+
+## Model origin and official-example provenance
+
+Every runtime model is generated parametrically through PyMAPDL. Three models
+adapt official Ansys examples; the original downloaded MIT-licensed source
+files are archived under `examples/official_ansys` for traceability. The API
+uses adapted functions so it can reuse the warm MAPDL session, accept SI
+parameters, and produce the project's standard JSON/CSV/images.
+
+| Dashboard template | Runtime source | MAPDL abstraction |
+|---|---|---|
+| Cantilever | `app/simulation/cantilever.py` | Rectangular BEAM188 line model |
+| Ansys corner bracket | `app/simulation/official_examples.py` | PLANE183 plane-stress model with thickness |
+| Ansys plate with hole | `app/simulation/official_examples.py` | PLANE183 plane-stress model with thickness |
+| Ansys pressure vessel | `app/simulation/official_examples.py` | PLANE182 plane-strain quarter-annulus model |
+| Table frame | `app/simulation/examples.py` | Four-leg/top-member BEAM188 frame |
+| Bolt | `app/simulation/examples.py` | Solid circular BEAM188 axial shank |
+| Screw | `app/simulation/examples.py` | Solid circular BEAM188 axial shank |
+| Nut | `app/simulation/examples.py` | Annular BEAM188 axial section |
+
+The bolt, screw, and nut are deliberately simplified shank/section surrogates.
+They do not include threads, preload, heads, washers, contact, friction, or
+stress concentration. The table is a beam frame, not a solid/contact assembly.
+
+PLANE183 and PLANE182 are official element formulations built into MAPDL and
+selected with the `ET` command; they are not files to download. The downloaded
+files are official example source code, retained as modelling provenance. An
+official example adaptation is still not a certified design for an arbitrary
+real bracket, plate, or vessel.
+
+Two optional downloaded Mechanical examples are present under
+`examples/mechanical`:
+
+- `cantilever.mechdat`
+- `example_03_simple_bolt_new.mechdat`
+
+They are retained only for separate Mechanical integration experiments. They
+are not used by `POST /simulate` and there are no downloaded table, screw, or
+nut CAD/Mechanical files in this repository.
+
+After each dashboard/API run, the readable model definition and native MAPDL
+database are retained privately inside `output/api/<run_id>` for engineering
+audit/debugging. They are not included in the client-facing download links or
+public result JSON. The client-facing outputs are the JSON, CSV, stress,
+deformation, failure-assessment, and force-sweep files.
+
+MAPDL's working files and solver logs are also retained under:
+
+```text
+D:\AnsysProjects\pyansys-poc\mapdl_runs
+```
+
+## Requirements
 
 - Windows
 - Python 3.11+
-- Ansys Student 2026 R1
+- Node.js/npm
+- Ansys Student 2026 R1 or a compatible MAPDL installation
 - PyMAPDL 0.73.2
 
-The default executable is:
+Default MAPDL executable:
 
 ```text
 D:\ANSYS Inc\ANSYS Student\v261\ansys\bin\winx64\MAPDL.exe
 ```
 
-You can override it without changing source code:
+Optional path overrides:
 
 ```powershell
 $env:PYANSYS_MAPDL_EXECUTABLE = 'D:\path\to\MAPDL.exe'
 $env:PYANSYS_MAPDL_RUN_ROOT = 'D:\AnsysProjects\pyansys-poc\mapdl_runs'
 ```
 
-## Setup
+## Installation
+
+Run from the repository root:
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+
+cd frontend
+npm install
+cd ..
 ```
 
-Close Workbench and Mechanical before the first local MAPDL launch.
+Close Workbench and Mechanical before launching this application when using a
+Student license, because another Ansys process can consume the available
+license.
 
-## Run order
+## Run backend and frontend
 
-Run all commands from the repository root.
-
-### 0. Preflight
-
-Before every local solver test, run:
-
-```powershell
-python scripts\00_preflight.py
-```
-
-Close Workbench and Mechanical if the preflight reports them. The Student
-edition has a limited demo license; an open Mechanical GUI can consume the
-license needed by the MAPDL solve. Connectivity alone is not enough to prove
-that a structural solve can obtain the license.
-
-### 1. Connectivity
-
-```powershell
-python scripts\01_connectivity.py
-```
-
-This starts MAPDL, prints its version, writes
-`output\connectivity\connectivity.json`, and closes the session.
-
-### 2. Single cantilever
-
-```powershell
-python scripts\02_single_cantilever.py
-```
-
-Outputs are written to `output\single`:
-
-- `results.csv`
-- `results.json`
-- `stress.png`
-- `deformation.png`
-
-The stress image uses the same BEAM188 extreme-fibre stress values written to
-CSV/JSON, in MPa. The deformation image uses the same MAPDL nodal displacement
-results written to CSV/JSON, in millimetres. This keeps the legends, displayed
-maximums, and downloaded numeric results consistent.
-
-### 3. Batch cases
-
-```powershell
-python scripts\03_batch_cantilever.py
-```
-
-The five approved cases are defined in `input\cases.csv`. Each case gets its
-own folder under `output\batch`, and the aggregate file is
-`output\batch\results.csv`.
-
-### 3a. Controlled force-range sweep
-
-The cantilever API and dashboard can also evaluate an inclusive force range:
-
-- start force
-- end force
-- number of checks (2–21)
-
-MAPDL performs one independent solve for every force value. The output folder
-contains the normal final-force `stress.png` and `deformation.png`, plus
-`force_sweep.png`, `results.csv`, and `results.json`. The CSV has one row
-per force value, so the response can be audited or plotted elsewhere.
-
-There is no arbitrary upper cap on force or geometry in the API. Values must
-still be positive and finite, and MAPDL may impose practical numerical,
-license, or mesh limits. For every linear-elastic result, the dashboard
-estimates the force at which the selected material's named reference strength
-would be reached. It is a **reference-strength threshold**, not a prediction
-that the part physically fractures. Actual breakage requires a validated
-nonlinear material model, product geometry, contacts, and failure criteria.
-
-### 4. Minimal API
-
-Install the requirements, then start the API from the repository root:
+Open terminal 1 in the repository root:
 
 ```powershell
 python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Check `http://127.0.0.1:8000/docs`, or submit the approved inputs to
-`POST /simulate`. The API returns result values plus URLs for CSV, JSON,
-stress, and deformation files. The solver is protected by a single-worker
-lock because the Student license and this PoC are intentionally single-job.
+Wait for `Application startup complete`. API startup pre-warms MAPDL once, so
+startup can take several seconds. Subsequent simulations reuse that solver.
 
-The minimal React dashboard is under `frontend`. In a second terminal:
+Open terminal 2:
 
 ```powershell
 cd frontend
-npm install
 npm run dev
 ```
 
-Open the displayed Vite URL, keep the API running on port 8000, and submit the
-form. The browser form calls FastAPI; FastAPI calls the reusable PyMAPDL
-service; MAPDL solves and returns the artifact links.
+Open the Vite URL, normally `http://localhost:5173`.
 
-### 5. Additional bounded examples
+Useful endpoints:
 
-The mandatory BRD template remains the cantilever beam. The repository also
-contains four deliberately simplified extension templates so the dashboard can
-demonstrate template selection and parameter updates:
+- API health: `http://127.0.0.1:8000/health`
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- Templates: `GET /templates`
+- Material cards: `GET /materials`
+- Simulation: `POST /simulate`
 
-- `table`: four-leg beam frame with a centre top load
-- `bolt`: solid axial shank surrogate
-- `screw`: solid axial shank surrogate
-- `nut`: annular axial compression surrogate
-
-These are not validated CAD/contact/thread models. They are PoC examples for
-proving that a selected template receives input values, solves, and returns
-CSV/JSON/images. Run all four locally with:
+Do not start a second backend on port 8000. If PowerShell reports error 10048,
+the existing backend is already listening. Find it with:
 
 ```powershell
-python scripts\04_example_templates.py
+Get-NetTCPConnection -LocalPort 8000 -State Listen
 ```
 
-The approved demonstration inputs are in `input\example_cases.csv`, and the
-aggregate CSV is written to `output\examples\results.csv`. The API exposes the
-same templates through `GET /templates`; select one with the `template` field
-in `POST /simulate`.
+The application also detects a live warm MAPDL session owned by another API
+process and refuses to launch a second solver, protecting the Student license.
 
-### 6. Controlled materials
+## API request
 
-The API and dashboard accept five explicit linear-isotropic material cards:
+All new clients should send a load range:
 
-- Structural Steel
-- Stainless Steel 304
-- Aluminium Alloy 6061-T6
-- Titanium Alloy Ti-6Al-4V
-- ABS Plastic (TECARAN natural approximation)
-
-Their elastic modulus, Poisson ratio, density, reference strength, basis, and
-source are defined once in `app/simulation/materials.py`. Generic wood is
-deliberately excluded because its properties depend on species, grain
-direction, moisture, and orthotropic behaviour.
-
-Run the complete material acceptance matrix with Mechanical/Workbench closed:
-
-```powershell
-python -m unittest discover -s tests -v
-python scripts\05_verify_materials.py
+```json
+{
+  "case_id": "api_case",
+  "template": "cantilever",
+  "force_start_n": 100,
+  "force_end_n": 3000,
+  "force_steps": 5,
+  "length_m": 1.0,
+  "width_m": 0.1,
+  "height_m": 0.1,
+  "diameter_m": 0.01,
+  "mesh_size_m": 0.05,
+  "material": "Structural Steel"
+}
 ```
 
-The real MAPDL report is written to
-`output\material_verification\verification.csv`. For the force-controlled
-cantilever, bending stress is governed by load and geometry, while displacement
-changes with elastic modulus and the safety factor changes with the card's
-documented reference strength.
+For backward compatibility, `force_n` is still accepted and is mapped to one
+MAPDL evaluation point:
 
-## First-template inputs
+```json
+{
+  "case_id": "legacy_case",
+  "template": "cantilever",
+  "force_n": 3000,
+  "length_m": 1.0,
+  "width_m": 0.1,
+  "height_m": 0.1,
+  "mesh_size_m": 0.05,
+  "material": "Structural Steel"
+}
+```
 
-The initial BEAM188 template uses SI units and a selected controlled material:
+Physical inputs must be positive and finite. There is no arbitrary upper force
+or geometry cap, but very large/small values can exceed the validity of the
+linear model or practical solver/license limits.
 
-- Single force, or a range of 2–21 force evaluations
-- Beam length: 1.0 m by default; positive finite values are accepted
-- Rectangular section width: 0.1 m
-- Rectangular section height: 0.1 m
-- Fixed support at one end
-- Distributed force over the opposite end face
+## Output files
 
-The input dataclass validates positive dimensions, valid Poisson ratio, and
-positive material properties before MAPDL is launched.
+Each API run is written under `output/api/<run_id>` and exposed through
+`/artifacts/<run_id>/...`:
 
-## Controlled material cards
+- `results.json`: complete run and force-curve data;
+- `results.csv`: one row per load point;
+- `stress.png`: final-load stress result;
+- `deformation.png`: final-load displacement result;
+- `failure_assessment.png`: separate screening report;
+- `force_sweep.png`: separate stress/displacement response chart;
+- `model_definition.txt`: private readable runtime model definition;
+- `model.db`: private native final MAPDL model database.
 
-The dashboard and API accept five named, fixed PoC cards:
+The JSON response also contains:
+
+```json
+{
+  "timing_seconds": {
+    "queue": 0.0,
+    "simulation_and_artifacts": 0.0,
+    "total": 0.0
+  },
+  "mapdl_session_reused": true
+}
+```
+
+## Performance
+
+The API keeps one MAPDL process warm and serializes requests with a lock,
+which is appropriate for the local Student-license PoC. Within a force sweep,
+the model is built and meshed once. Later points replace the nodal load and
+perform a fresh MAPDL solve on the existing mesh. Result images are generated
+once for the final load.
+
+Measured locally on the current machine:
+
+- Previous observed request: about 20.11 seconds.
+- Optimized 5-point bolt sweep: about 6.64 seconds, including all artifacts and
+  the two model downloads.
+- Optimized legacy one-point cantilever request: about 5.64 seconds.
+
+Times depend on the machine, antivirus, material/model size, mesh density, and
+number of checks. A request can also wait in the queue if another solve is in
+progress. Use `timing_seconds` rather than client-side network timing to locate
+the delay.
+
+## Materials
+
+Controlled cards are defined once in `app/simulation/materials.py`:
 
 - Structural Steel
 - Stainless Steel 304
@@ -217,36 +259,155 @@ The dashboard and API accept five named, fixed PoC cards:
 - Titanium Alloy Ti-6Al-4V
 - ABS Plastic
 
-Each card supplies MAPDL with its own elastic modulus, Poisson ratio, and
-density. Its named reference strength is used by Python to calculate the
-reported safety factor. The same values and strength basis are written to CSV
-and JSON so a material change can be audited. Generic wood is deliberately not
-included because its structural properties cannot be represented responsibly
-without species, grade, grain direction, and moisture data.
+These are application-owned cards sourced from the URLs recorded in
+`app/simulation/materials.py`; they are not automatically fetched from MAPDL.
+The UI therefore labels them **Application material card - properties sent to
+MAPDL**. Elastic modulus, Poisson ratio, and density are supplied to MAPDL with
+`MP,EX`, `MP,PRXY`, and `MP,DENS`. Reference strength remains in the
+application's screening layer for safety factor and threshold estimates. JSON
+records `material_source_url` and `material_data_origin` for auditability.
+Generic wood is excluded because species, grade, moisture, grain direction,
+and orthotropic properties are required.
 
-Run the exact five-material acceptance matrix with Workbench/Mechanical closed:
+## Stress and displacement methods
+
+- Cantilever and table stress: BEAM188 extreme-fibre section stress extracted
+  from MAPDL SMISC 32/33.
+- Official bracket and plate stress: PLANE183 MAPDL nodal equivalent stress.
+- Official pressure-vessel stress: PLANE182 MAPDL nodal equivalent stress.
+- Bolt/screw/nut stress: nominal axial `force / section area` for the exact
+  BEAM188 section used by MAPDL.
+- All template displacements: MAPDL nodal displacement results.
+- Safety factor: selected material reference strength divided by maximum
+  reported stress.
+
+The axial stress formula is exact for these uniform one-dimensional shank
+surrogates, but it does not model real thread-root or contact stress.
+
+## Failure screening fields
+
+Results include:
+
+- `failure_status`
+- `breakage_assessment`
+- `stress_utilization`
+- `deformation_ratio`
+- `large_deformation_warning`
+- `critical_stress_location`
+- `critical_displacement_location`
+- `estimated_reference_strength_load_n`
+- `estimated_deformation_limit_load_n`
+- `governing_screening_load_n`
+- `governing_screening_criterion`
+- `failure_summary`
+
+`break_force_n` is retained for API compatibility, but it means the estimated
+reference-strength crossing, not guaranteed fracture. If the crossing is
+outside the selected load range, the sweep image labels it as above/below range
+without changing the plotted axis.
+For the pressure vessel, the range and threshold values are pressure in Pa;
+use `load_value`, `load_unit`, `threshold_load_value`, and
+`threshold_load_unit`. The legacy `force_n`/`break_force_n` property names are
+retained only for response compatibility.
+
+## Validation and acceptance tests
+
+Deterministic Python tests:
 
 ```powershell
-python scripts\05_verify_materials.py
+python -m unittest discover -s tests -v
 ```
 
-The script solves one 1000 N cantilever per material, compares MAPDL stress and
-displacement with beam-reference equations, verifies the safety-factor
-arithmetic, checks all four artifacts, and writes
-`output\material_verification\verification.csv`.
+Frontend production build:
 
-## BRD boundary
+```powershell
+cd frontend
+npm run build
+```
 
-The mandatory PoC is the Python/PyMAPDL workflow and CSV/JSON/image output for
-the cantilever. FastAPI and React are later-phase foundations in this local
-repository. The additional table/bolt/screw/nut templates are demonstration
-extensions; a production workflow would require separately validated geometry,
-materials, supports, contacts, load cases, and acceptance tests for each
-product.
+Real MAPDL range verification for the original five templates:
 
-## Known troubleshooting point
+```powershell
+python scripts\08_verify_all_template_ranges.py
+```
 
-If MAPDL starts but exits during `SOLVE` with `No such feature exists` or
-`Maximum licensed number of demo users already reached`, close all Ansys GUI
-windows and rerun the preflight. The detailed MAPDL logs are stored under
-`D:\AnsysProjects\pyansys-poc\mapdl_runs`.
+The three official adaptations were additionally acceptance-tested through the
+API with two load points. Each returned the intended PLANE183/PLANE182 type,
+finite stress/displacement, JSON/CSV/PNG artifacts, and a 2.0 response ratio
+when the linear load/pressure was doubled. Private `model.db` and
+`model_definition.txt` artifacts are retained on disk but are not public
+downloads.
+
+Report:
+
+```text
+output\range_verification\verification.json
+```
+
+Real MAPDL template/material matrix, 25 combinations:
+
+```powershell
+python scripts\09_verify_model_material_matrix.py
+```
+
+Report:
+
+```text
+output\model_material_matrix\verification.json
+```
+
+End-to-end warm-session API verification (start the backend first):
+
+```powershell
+python scripts\10_verify_api_warm_session.py
+```
+
+Report: `output\api_warm_verification.json`.
+
+Additional scripts:
+
+- `scripts/00_preflight.py`: environment/license preflight;
+- `scripts/01_connectivity.py`: launch/connectivity check;
+- `scripts/02_single_cantilever.py`: single cantilever;
+- `scripts/03_batch_cantilever.py`: CSV cantilever batch;
+- `scripts/04_example_templates.py`: single-load extension examples;
+- `scripts/05_verify_materials.py`: five-material cantilever references;
+- `scripts/06_validate_mechanical_sample.py`: optional Mechanical sample check;
+- `scripts/07_run_downloaded_cantilever.py`: optional downloaded Mechanical test.
+- `scripts/08_verify_all_template_ranges.py`: all-template range acceptance;
+- `scripts/09_verify_model_material_matrix.py`: all template/material pairs;
+- `scripts/10_verify_api_warm_session.py`: warm API, timing, and downloads.
+
+## Troubleshooting
+
+### Port 8000 already in use
+
+Use the existing backend, or stop its current owning PID before starting one
+replacement process:
+
+```powershell
+$connection = Get-NetTCPConnection -LocalPort 8000 -State Listen
+Stop-Process -Id $connection.OwningProcess -Force
+```
+
+### MAPDL license unavailable
+
+Close Workbench/Mechanical and run:
+
+```powershell
+python scripts\00_preflight.py
+```
+
+Errors such as `No such feature exists` or `Maximum licensed number of demo
+users already reached` are license/session issues, not structural results.
+
+### API startup appears slow
+
+The backend intentionally launches MAPDL during startup. Wait for `Application
+startup complete`; this startup cost is paid once and then reused.
+
+### Large deformation warning
+
+Do not interpret the linear displacement or extrapolated reference-strength
+load as quantitatively reliable after the model leaves its small-deformation
+scope. Use a validated nonlinear analysis for production decisions.

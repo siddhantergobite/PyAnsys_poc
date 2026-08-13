@@ -12,6 +12,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from .config import CantileverInputs, ForceRange
+from .assessment import (
+    FailureAssessment,
+    assess_failure,
+    export_failure_assessment_image,
+    export_force_sweep_image,
+)
 from .results import SimulationResult
 
 
@@ -59,6 +65,22 @@ def _build_model(mapdl, inputs: CantileverInputs) -> None:
 
     mapdl.run("/SOLU")
     mapdl.antype("STATIC")
+    mapdl.solve()
+    mapdl.finish()
+    mapdl.post1()
+    mapdl.set("LAST")
+
+
+def _resolve_existing_model(mapdl, inputs: CantileverInputs) -> None:
+    """Replace the cantilever load and solve without rebuilding its mesh."""
+
+    mapdl.finish()
+    mapdl.run("/SOLU")
+    mapdl.allsel("ALL")
+    mapdl.fdele("ALL", "ALL")
+    mapdl.nsel("S", "LOC", "X", inputs.length_m)
+    mapdl.f("ALL", "FY", -inputs.force_n)
+    mapdl.allsel("ALL")
     mapdl.solve()
     mapdl.finish()
     mapdl.post1()
@@ -240,6 +262,60 @@ def _extract_point(mapdl, inputs: CantileverInputs) -> tuple[np.ndarray, np.ndar
     )
 
 
+def _cantilever_locations(
+    mapdl,
+    inputs: CantileverInputs,
+    stress_values: np.ndarray,
+    displacement_values: np.ndarray,
+) -> tuple[str, str, str]:
+    """Describe the critical solver locations for the assessment report."""
+
+    stress_index = int(np.argmax(np.abs(np.asarray(stress_values, dtype=float))))
+    element_count = max(int(np.asarray(stress_values).size), 1)
+    stress_x = inputs.length_m * (stress_index + 0.5) / element_count
+    if stress_index == 0:
+        stress_region = "near the fixed support"
+    elif stress_index == element_count - 1:
+        stress_region = "near the free end"
+    else:
+        stress_region = "along the beam span"
+    stress_location = (
+        f"BEAM188 element {stress_index + 1} near x={stress_x:.4g} m ({stress_region})"
+    )
+
+    nodes = np.asarray(mapdl.mesh.nodes, dtype=float)
+    displacement_values = np.asarray(displacement_values, dtype=float)
+    node_index = int(np.argmax(np.abs(displacement_values)))
+    node_x = float(nodes[node_index, 0])
+    displacement_location = f"MAPDL node near x={node_x:.4g} m (largest displacement)"
+    load_location = f"FY load applied at the free-end node set x={inputs.length_m:.4g} m"
+    return stress_location, displacement_location, load_location
+
+
+def _cantilever_assessment(
+    mapdl,
+    inputs: CantileverInputs,
+    stress_values: np.ndarray,
+    displacement_values: np.ndarray,
+    maximum_stress: float,
+    maximum_displacement: float,
+):
+    stress_location, displacement_location, load_location = _cantilever_locations(
+        mapdl, inputs, stress_values, displacement_values
+    )
+    assessment = assess_failure(
+        force_n=inputs.force_n,
+        maximum_stress_pa=maximum_stress,
+        reference_strength_pa=inputs.yield_strength_pa,
+        maximum_displacement_m=maximum_displacement,
+        deformation_reference_length_m=inputs.length_m,
+        critical_stress_location=stress_location,
+        critical_displacement_location=displacement_location,
+        load_application_location=load_location,
+    )
+    return assessment
+
+
 def _first_strength_crossing(
     curve: list[dict[str, float | str]], reference_strength_pa: float
 ) -> float | None:
@@ -255,7 +331,11 @@ def _first_strength_crossing(
         if stress < reference_strength_pa:
             continue
         if index == 0:
-            return force
+            # The crossing is below the requested range.  Returning the first
+            # sampled force would incorrectly report the range start as the
+            # material threshold; let the linear estimate recover the actual
+            # below-range crossing instead.
+            return None
         previous = curve[index - 1]
         previous_stress = float(previous["maximum_stress_pa"])
         previous_force = float(previous["force_n"])
@@ -298,67 +378,6 @@ def _estimate_linear_threshold_force(
     return None
 
 
-def _export_force_sweep_image(
-    output_dir: Path,
-    curve: list[dict[str, float | str]],
-    reference_strength_pa: float,
-    strength_basis: str,
-    break_force_n: float | None,
-) -> str:
-    """Export a clear force-response plot for a bounded cantilever sweep."""
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / "force_sweep.png"
-    forces = np.array([float(point["force_n"]) for point in curve])
-    stress_mpa = np.array([float(point["maximum_stress_pa"]) / 1e6 for point in curve])
-    displacement_mm = np.array(
-        [float(point["maximum_displacement_m"]) * 1e3 for point in curve]
-    )
-    reference_mpa = reference_strength_pa / 1e6
-
-    figure, (stress_axis, displacement_axis) = plt.subplots(1, 2, figsize=(12, 4.7))
-    stress_axis.plot(forces, stress_mpa, marker="o", color="#0a8f83", linewidth=2.4)
-    stress_axis.axhline(reference_mpa, color="#cc4b37", linestyle="--", linewidth=1.5,
-                        label=f"Reference {strength_basis}: {reference_mpa:.1f} MPa")
-    stress_axis.fill_between(forces, stress_mpa, reference_mpa,
-                             where=stress_mpa <= reference_mpa, color="#d9f1e9", alpha=0.8)
-    stress_axis.fill_between(forces, stress_mpa, reference_mpa,
-                             where=stress_mpa > reference_mpa, color="#fde0d7", alpha=0.9)
-    if break_force_n is not None:
-        stress_axis.axvline(break_force_n, color="#cc4b37", linestyle=":", linewidth=2)
-        stress_axis.annotate(
-            f"Threshold about {break_force_n:.0f} N",
-            xy=(break_force_n, reference_mpa), xytext=(6, 10), textcoords="offset points",
-            color="#9a321f", fontweight="bold",
-        )
-    stress_axis.set_title("MAPDL force sweep - maximum bending stress", fontweight="bold")
-    stress_axis.set_xlabel("Applied force (N)")
-    stress_axis.set_ylabel("Maximum bending stress (MPa)")
-    stress_axis.grid(alpha=0.25)
-    stress_axis.legend(fontsize=8, loc="upper left")
-
-    points = displacement_axis.scatter(forces, displacement_mm, c=stress_mpa, cmap="turbo", s=62, zorder=3)
-    displacement_axis.plot(forces, displacement_mm, color="#315f89", linewidth=2.2)
-    if break_force_n is not None:
-        displacement_axis.axvline(break_force_n, color="#cc4b37", linestyle=":", linewidth=2)
-    displacement_axis.set_title("MAPDL force sweep - end displacement", fontweight="bold")
-    displacement_axis.set_xlabel("Applied force (N)")
-    displacement_axis.set_ylabel("Maximum displacement (mm)")
-    displacement_axis.grid(alpha=0.25)
-    colour_bar = figure.colorbar(points, ax=displacement_axis, pad=0.02)
-    colour_bar.set_label("Maximum stress (MPa)")
-    figure.suptitle(
-        "Reference-strength crossing is an elastic PoC threshold, not a physical break prediction.",
-        fontsize=9,
-        color="#52677d",
-        y=0.01,
-    )
-    figure.tight_layout(rect=(0, 0.05, 1, 1))
-    figure.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
-    plt.close(figure)
-    return path.name
-
-
 def solve_cantilever(mapdl, inputs: CantileverInputs, output_dir: Path) -> SimulationResult:
     """Build, solve, extract results, and export images for one case."""
 
@@ -368,6 +387,14 @@ def solve_cantilever(mapdl, inputs: CantileverInputs, output_dir: Path) -> Simul
     )
     safety_factor = (
         inputs.yield_strength_pa / maximum_stress if maximum_stress > 0 else None
+    )
+    assessment = _cantilever_assessment(
+        mapdl,
+        inputs,
+        stress_values,
+        displacement_values,
+        maximum_stress,
+        maximum_displacement,
     )
     break_force_n = _linear_reference_threshold_force(
         inputs.force_n, maximum_stress, inputs.yield_strength_pa
@@ -380,7 +407,22 @@ def solve_cantilever(mapdl, inputs: CantileverInputs, output_dir: Path) -> Simul
         else "not_evaluated"
     )
     stress_image, displacement_image = _export_cantilever_images(
-        mapdl, inputs, output_dir, stress_values, displacement_values
+        mapdl,
+        inputs,
+        output_dir,
+        stress_values,
+        displacement_values,
+    )
+    failure_image = export_failure_assessment_image(
+        output_dir,
+        template="Cantilever beam",
+        material=inputs.material,
+        force_n=inputs.force_n,
+        maximum_stress_pa=maximum_stress,
+        maximum_displacement_m=maximum_displacement,
+        reference_strength_pa=inputs.yield_strength_pa,
+        assessment=assessment,
+        break_force_n=break_force_n,
     )
     return SimulationResult(
         case_id=inputs.case_id,
@@ -403,6 +445,8 @@ def solve_cantilever(mapdl, inputs: CantileverInputs, output_dir: Path) -> Simul
         displacement_image=displacement_image,
         break_force_n=break_force_n,
         break_status=break_status,
+        failure_assessment_image=failure_image,
+        **assessment.as_result_fields(),
     )
 
 
@@ -412,7 +456,8 @@ def solve_cantilever_range(
     """Solve every requested force point and retain the final spatial result.
 
     The final force produces the existing spatial stress/deformation images.
-    ``force_sweep.png`` presents the solver values across the requested range.
+    Separate force-sweep and failure-assessment images are generated so each
+    report remains readable.
     """
 
     inputs.validate()
@@ -424,9 +469,12 @@ def solve_cantilever_range(
     final_stress = 0.0
     final_displacement = 0.0
 
-    for force_n in force_range.values():
+    for point_index, force_n in enumerate(force_range.values()):
         point_inputs = replace(inputs, force_n=force_n)
-        _build_model(mapdl, point_inputs)
+        if point_index == 0:
+            _build_model(mapdl, point_inputs)
+        else:
+            _resolve_existing_model(mapdl, point_inputs)
         stress_values, displacement_values, maximum_stress, maximum_displacement = _extract_point(
             mapdl, point_inputs
         )
@@ -444,6 +492,52 @@ def solve_cantilever_range(
                 else "within_reference_strength",
             }
         )
+        point_assessment = _cantilever_assessment(
+            mapdl,
+            point_inputs,
+            stress_values,
+            displacement_values,
+            maximum_stress,
+            maximum_displacement,
+        )
+        curve[-1].update(
+            {
+                "failure_status": point_assessment.failure_status,
+                "breakage_assessment": point_assessment.breakage_assessment,
+                "stress_utilization": (
+                    point_assessment.stress_utilization
+                    if point_assessment.stress_utilization is not None
+                    else ""
+                ),
+                "deformation_ratio": (
+                    point_assessment.deformation_ratio
+                    if point_assessment.deformation_ratio is not None
+                    else ""
+                ),
+                "large_deformation_warning": point_assessment.large_deformation_warning,
+                "estimated_failure_load_n": (
+                    point_assessment.estimated_failure_load_n
+                    if point_assessment.estimated_failure_load_n is not None
+                    else ""
+                ),
+                "estimated_reference_strength_load_n": (
+                    point_assessment.estimated_reference_strength_load_n
+                    if point_assessment.estimated_reference_strength_load_n is not None
+                    else ""
+                ),
+                "estimated_deformation_limit_load_n": (
+                    point_assessment.estimated_deformation_limit_load_n
+                    if point_assessment.estimated_deformation_limit_load_n is not None
+                    else ""
+                ),
+                "governing_screening_load_n": (
+                    point_assessment.governing_screening_load_n
+                    if point_assessment.governing_screening_load_n is not None
+                    else ""
+                ),
+                "governing_screening_criterion": point_assessment.governing_screening_criterion,
+            }
+        )
         final_inputs = point_inputs
         final_stress_values = stress_values
         final_displacement_values = displacement_values
@@ -453,13 +547,25 @@ def solve_cantilever_range(
     crossing_force_n = _first_strength_crossing(curve, inputs.yield_strength_pa)
     estimated_force_n = _estimate_linear_threshold_force(curve, inputs.yield_strength_pa)
     break_force_n = crossing_force_n if crossing_force_n is not None else estimated_force_n
-    if crossing_force_n is not None:
+    threshold_reached = any(
+        float(point["maximum_stress_pa"]) >= inputs.yield_strength_pa
+        for point in curve
+    )
+    if threshold_reached:
         break_status = "threshold_reached"
     elif estimated_force_n is not None:
         break_status = "threshold_estimated"
     else:
         break_status = "not_evaluated"
     final_safety_factor = inputs.yield_strength_pa / final_stress if final_stress > 0 else None
+    final_assessment = _cantilever_assessment(
+        mapdl,
+        final_inputs,
+        final_stress_values,
+        final_displacement_values,
+        final_stress,
+        final_displacement,
+    )
     stress_image, displacement_image = _export_cantilever_images(
         mapdl,
         final_inputs,
@@ -467,12 +573,23 @@ def solve_cantilever_range(
         final_stress_values,
         final_displacement_values,
     )
-    sweep_image = _export_force_sweep_image(
+    failure_image = export_failure_assessment_image(
         output_dir,
-        curve,
-        inputs.yield_strength_pa,
-        inputs.strength_basis or "reference strength",
-        break_force_n,
+        template="Cantilever beam",
+        material=inputs.material,
+        force_n=final_inputs.force_n,
+        maximum_stress_pa=final_stress,
+        maximum_displacement_m=final_displacement,
+        reference_strength_pa=inputs.yield_strength_pa,
+        assessment=final_assessment,
+        break_force_n=break_force_n,
+    )
+    sweep_image = export_force_sweep_image(
+        output_dir,
+        curve=curve,
+        reference_strength_pa=inputs.yield_strength_pa,
+        strength_basis=inputs.strength_basis or "reference strength",
+        break_force_n=break_force_n,
     )
     return SimulationResult(
         case_id=inputs.case_id,
@@ -499,5 +616,7 @@ def solve_cantilever_range(
         break_force_n=break_force_n,
         break_status=break_status,
         force_curve=curve,
+        failure_assessment_image=failure_image,
         sweep_image=sweep_image,
+        **final_assessment.as_result_fields(),
     )

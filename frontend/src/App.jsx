@@ -52,7 +52,7 @@ const initialForm = {
   template: "cantilever",
   force_start_n: 100,
   force_end_n: 1000,
-  force_steps: 5,
+  force_increment_n: 100,
   length_m: 1,
   width_m: 0.1,
   height_m: 0.1,
@@ -62,14 +62,14 @@ const initialForm = {
 };
 
 const MODEL_DEFAULTS = {
-  cantilever: { force_start_n: 100, force_end_n: 1000, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
-  corner_bracket: { force_start_n: 1000, force_end_n: 5000, length_m: 0.3, width_m: 0.08, height_m: 0.008, diameter_m: 0.025, mesh_size_m: 0.008 },
-  plate_hole: { force_start_n: 1000, force_end_n: 5000, length_m: 0.4, width_m: 0.1, height_m: 0.001, diameter_m: 0.03, mesh_size_m: 0.01 },
-  pressure_vessel: { force_start_n: 1e6, force_end_n: 5e6, length_m: 0.175, width_m: 0.2, height_m: 0.01, diameter_m: 0.03, mesh_size_m: 0.006 },
-  table: { force_start_n: 100, force_end_n: 1000, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
-  bolt: { force_start_n: 100, force_end_n: 1000, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
-  screw: { force_start_n: 100, force_end_n: 1000, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
-  nut: { force_start_n: 100, force_end_n: 1000, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
+  cantilever: { force_start_n: 100, force_end_n: 1000, force_increment_n: 100, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
+  corner_bracket: { force_start_n: 1000, force_end_n: 5000, force_increment_n: 1000, length_m: 0.3, width_m: 0.08, height_m: 0.008, diameter_m: 0.025, mesh_size_m: 0.008 },
+  plate_hole: { force_start_n: 1000, force_end_n: 5000, force_increment_n: 1000, length_m: 0.4, width_m: 0.1, height_m: 0.001, diameter_m: 0.03, mesh_size_m: 0.01 },
+  pressure_vessel: { force_start_n: 1e6, force_end_n: 5e6, force_increment_n: 1e6, length_m: 0.175, width_m: 0.2, height_m: 0.01, diameter_m: 0.03, mesh_size_m: 0.006 },
+  table: { force_start_n: 100, force_end_n: 1000, force_increment_n: 100, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
+  bolt: { force_start_n: 100, force_end_n: 1000, force_increment_n: 100, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
+  screw: { force_start_n: 100, force_end_n: 1000, force_increment_n: 100, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
+  nut: { force_start_n: 100, force_end_n: 1000, force_increment_n: 100, length_m: 1, width_m: 0.1, height_m: 0.1, diameter_m: 0.01, mesh_size_m: 0.05 },
 };
 
 function App() {
@@ -187,9 +187,9 @@ function App() {
               <div className="range-grid">
                 <label>Start {loadName}<span className="unit">{isPressure ? "Pa" : "N"}</span><input name="force_start_n" type="number" step="any" value={form.force_start_n} onChange={update} /></label>
                 <label>End {loadName}<span className="unit">{isPressure ? "Pa" : "N"}</span><input name="force_end_n" type="number" step="any" value={form.force_end_n} onChange={update} /></label>
-                <label className="range-steps">Checks in range<input name="force_steps" type="number" min="2" max="21" step="1" value={form.force_steps} onChange={update} /></label>
+                <label className="range-steps">Load increment<span className="unit">{isPressure ? "Pa" : "N"}</span><input name="force_increment_n" type="number" min="0.000001" step="any" value={form.force_increment_n} onChange={update} /></label>
               </div>
-              <p className="field-help">MAPDL solves every load point. The dashboard also estimates the load at the selected material&apos;s reference strength, even when it is outside this range. It is an elastic screening threshold, not a physical fracture prediction.</p>
+              <p className="field-help">MAPDL solves start, then each requested increment, and includes the end load. The dashboard also estimates the selected material&apos;s reference-strength load. It is an elastic screening threshold, not a physical fracture prediction.</p>
               <label>Material<select name="material" value={form.material} onChange={update}>{materials.length ? materials.map((material) => <option key={material.name} value={material.name}>{material.name}</option>) : <option>Structural Steel</option>}</select></label>
               {materials.find((material) => material.name === form.material) && <p className="field-help material-help">Application-sourced engineering properties are sent to MAPDL; reference strength is used by the application&apos;s screening layer.</p>}
             </div>

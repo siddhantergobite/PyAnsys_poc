@@ -46,6 +46,7 @@ class SimulationResult:
     diameter_m: float | None = None
     force_start_n: float | None = None
     force_end_n: float | None = None
+    force_increment_n: float | None = None
     force_steps: int | None = None
     break_force_n: float | None = None
     threshold_load_value: float | None = None
@@ -94,7 +95,7 @@ def write_result_files(result: SimulationResult, output_dir: Path) -> None:
             fields = [
                 "case_id", "template", "material", "force_n", "load_value", "load_type", "load_unit",
                 "maximum_stress_pa", "maximum_displacement_m", "safety_factor",
-                "point_status", "force_start_n", "force_end_n", "force_steps",
+                "point_status", "force_start_n", "force_end_n", "force_increment_n", "force_steps",
                 "break_force_n", "break_status", "reference_strength_pa",
                 "threshold_load_value", "threshold_load_unit", "model_provenance",
                 "element_type", "official_source_url", "material_source_url",
@@ -116,6 +117,7 @@ def write_result_files(result: SimulationResult, output_dir: Path) -> None:
                 "load_unit": result.load_unit,
                 "force_start_n": result.force_start_n,
                 "force_end_n": result.force_end_n,
+                "force_increment_n": result.force_increment_n,
                 "force_steps": result.force_steps,
                 "break_force_n": result.break_force_n,
                 "break_status": result.break_status,

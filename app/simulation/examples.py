@@ -736,6 +736,7 @@ def solve_example_range(
         diameter_m=inputs.diameter_m,
         force_start_n=force_range.start_n,
         force_end_n=force_range.end_n,
+        force_increment_n=force_range.effective_increment_n,
         force_steps=len(curve),
         break_force_n=break_force_n,
         break_status=break_status,

@@ -106,23 +106,51 @@ def default_inputs(case_id: str = "single_1000N", force_n: float = 1000.0) -> Ca
 
 @dataclass(frozen=True)
 class ForceRange:
-    """A bounded, inclusive force sweep for every supported template."""
+    """An inclusive load sweep driven by an explicit increment.
+
+    ``steps`` is retained as a compatibility input for older scripts. New
+    callers should provide ``increment_n`` so the exact requested load values
+    are solved.
+    """
 
     start_n: float
     end_n: float
-    steps: int = 5
+    increment_n: float | None = None
+    steps: int | None = None
 
     def validate(self) -> None:
         if self.start_n <= 0 or self.end_n <= 0:
             raise ValueError("force range values must be greater than zero")
         if self.end_n < self.start_n:
             raise ValueError("force_end_n must be greater than or equal to force_start_n")
-        if not 2 <= self.steps <= 21:
-            raise ValueError("force_steps must be between 2 and 21")
+        if self.increment_n is not None and self.increment_n <= 0:
+            raise ValueError("force_increment_n must be greater than zero")
+        if self.increment_n is None:
+            if self.steps is None or not 2 <= self.steps <= 1001:
+                raise ValueError("legacy force_steps must be between 2 and 1001")
 
     def values(self) -> tuple[float, ...]:
         self.validate()
         if self.start_n == self.end_n:
             return (float(self.start_n),)
-        increment = (self.end_n - self.start_n) / (self.steps - 1)
-        return tuple(float(self.start_n + index * increment) for index in range(self.steps))
+        increment = self.increment_n
+        if increment is None:
+            increment = (self.end_n - self.start_n) / (self.steps - 1)
+        values = []
+        current = float(self.start_n)
+        tolerance = max(abs(self.end_n), abs(self.start_n), 1.0) * 1e-12
+        while current < self.end_n - tolerance:
+            values.append(current)
+            current += increment
+        if not values or abs(values[-1] - self.end_n) > tolerance:
+            values.append(float(self.end_n))
+        else:
+            values[-1] = float(self.end_n)
+        if len(values) > 1001:
+            raise ValueError("load increment creates more than 1001 MAPDL checks")
+        return tuple(values)
+
+    @property
+    def effective_increment_n(self) -> float:
+        values = self.values()
+        return 0.0 if len(values) < 2 else float(values[1] - values[0])

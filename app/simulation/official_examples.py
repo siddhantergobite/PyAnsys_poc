@@ -497,6 +497,7 @@ def solve_official_example_range(
         diameter_m=inputs.feature_diameter_m,
         force_start_n=load_range.start_n,
         force_end_n=load_range.end_n,
+        force_increment_n=load_range.effective_increment_n,
         force_steps=len(curve),
         break_force_n=threshold,
         break_status=break_status,

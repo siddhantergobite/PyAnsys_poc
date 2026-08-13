@@ -172,7 +172,7 @@ All new clients should send a load range:
   "template": "cantilever",
   "force_start_n": 100,
   "force_end_n": 3000,
-  "force_steps": 5,
+  "force_increment_n": 100,
   "length_m": 1.0,
   "width_m": 0.1,
   "height_m": 0.1,
@@ -181,6 +181,10 @@ All new clients should send a load range:
   "material": "Structural Steel"
 }
 ```
+
+The solver evaluates `100, 200, 300, ...` and always includes the requested
+end load. If the increment does not divide the range exactly, the end load is
+added as the final point. This behavior applies to every model template.
 
 For backward compatibility, `force_n` is still accepted and is mapped to one
 MAPDL evaluation point:

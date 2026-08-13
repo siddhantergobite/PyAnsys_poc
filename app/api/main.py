@@ -105,15 +105,16 @@ class SimulationRequest(BaseModel):
         "cantilever", "corner_bracket", "plate_hole", "pressure_vessel",
         "table", "bolt", "screw", "nut",
     ] = "cantilever"
-    # ``force_n`` remains accepted for existing API clients. New runs use the
-    # bounded start/end/steps force sweep for every supported template.
+    # ``force_n`` remains accepted for existing API clients. New runs use an
+    # explicit start/end/increment sweep for every supported template.
     # Physical values intentionally have no arbitrary upper cap. The solver
     # still requires positive, finite values; a zero-length or zero-section
     # model is not a valid structural model.
     force_n: float | None = Field(default=None, gt=0)
     force_start_n: float = Field(default=100.0, gt=0)
     force_end_n: float = Field(default=1000.0, gt=0)
-    force_steps: int = Field(default=5, ge=2, le=21)
+    force_increment_n: float = Field(default=100.0, gt=0)
+    force_steps: int | None = Field(default=None, ge=2, le=1001)
     length_m: float = Field(default=1.0, gt=0)
     width_m: float = Field(default=0.1, gt=0)
     height_m: float = Field(default=0.1, gt=0)
@@ -131,6 +132,7 @@ class SimulationRequest(BaseModel):
         "force_n",
         "force_start_n",
         "force_end_n",
+        "force_increment_n",
         "length_m",
         "width_m",
         "height_m",
@@ -155,12 +157,28 @@ class SimulationRequest(BaseModel):
         mapped = dict(values)
         mapped["force_start_n"] = mapped["force_n"]
         mapped["force_end_n"] = mapped["force_n"]
-        mapped["force_steps"] = 2
+        mapped["force_increment_n"] = mapped["force_n"]
+        return mapped
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_legacy_steps_to_increment(cls, values):
+        """Translate the previous evenly-spaced API contract."""
+
+        if not isinstance(values, dict):
+            return values
+        if "force_increment_n" in values or "force_steps" not in values:
+            return values
+        mapped = dict(values)
+        start = float(mapped.get("force_start_n", 100.0))
+        end = float(mapped.get("force_end_n", 1000.0))
+        steps = int(mapped["force_steps"])
+        mapped["force_increment_n"] = (end - start) / (steps - 1) if end > start else 1.0
         return mapped
 
     @model_validator(mode="after")
     def validate_force_range(self):
-        ForceRange(self.force_start_n, self.force_end_n, self.force_steps).validate()
+        ForceRange(self.force_start_n, self.force_end_n, self.force_increment_n).validate()
         return self
 
 
@@ -251,7 +269,7 @@ def simulate(request: SimulationRequest) -> dict:
                     ForceRange(
                         start_n=request.force_start_n,
                         end_n=request.force_end_n,
-                        steps=request.force_steps,
+                        increment_n=request.force_increment_n,
                     ),
                     output_dir,
                 )
@@ -262,7 +280,7 @@ def simulate(request: SimulationRequest) -> dict:
                     ForceRange(
                         start_n=request.force_start_n,
                         end_n=request.force_end_n,
-                        steps=request.force_steps,
+                        increment_n=request.force_increment_n,
                     ),
                     output_dir,
                 )
@@ -273,7 +291,7 @@ def simulate(request: SimulationRequest) -> dict:
                     ForceRange(
                         start_n=request.force_start_n,
                         end_n=request.force_end_n,
-                        steps=request.force_steps,
+                        increment_n=request.force_increment_n,
                     ),
                     output_dir,
                 )
